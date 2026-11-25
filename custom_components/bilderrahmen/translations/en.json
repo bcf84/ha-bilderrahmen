@@ -10,25 +10,14 @@
           "port": "Port"
         }
       },
-      "content": {
-        "title": "Content",
-        "description": "Choose what the frame shows. Empty fields are hidden.",
+      "display": {
+        "title": "Display",
+        "description": "Design the layout in the “Bilderrahmen” editor in the sidebar.",
         "data": {
-          "weather_entity": "Weather",
-          "waste_entities": "Waste collection sensors",
-          "calendar_entities": "Calendars",
-          "calendar_title": "Calendar heading",
-          "calendar_days": "Calendar: days ahead",
-          "value_entities": "Additional values",
-          "values_title": "Values heading",
           "rotation": "Mounting orientation",
           "interval": "Refresh every"
         },
         "data_description": {
-          "weather_entity": "Current weather and 3-day forecast on the left.",
-          "waste_entities": "e.g. Waste Collection Schedule. Colour is derived from the name.",
-          "calendar_entities": "Events or birthdays; duplicates are merged.",
-          "value_entities": "Any entities, e.g. temperatures, locks, battery.",
           "interval": "The frame only redraws when something changed."
         }
       }
@@ -37,7 +26,7 @@
       "cannot_connect": "Cannot reach the frame. Is the receiver running on the Pi?"
     },
     "abort": {
-      "already_configured": "This frame is already configured."
+      "already_configured": "Already configured."
     }
   },
   "options": {
@@ -45,29 +34,18 @@
       "init": {
         "title": "Picture frame",
         "menu_options": {
-          "content": "Content and display",
+          "display": "Display and interval",
           "connection": "Connection"
         }
       },
-      "content": {
-        "title": "Content",
-        "description": "Choose what the frame shows. Empty fields are hidden.",
+      "display": {
+        "title": "Display",
+        "description": "Design the layout in the “Bilderrahmen” editor in the sidebar.",
         "data": {
-          "weather_entity": "Weather",
-          "waste_entities": "Waste collection sensors",
-          "calendar_entities": "Calendars",
-          "calendar_title": "Calendar heading",
-          "calendar_days": "Calendar: days ahead",
-          "value_entities": "Additional values",
-          "values_title": "Values heading",
           "rotation": "Mounting orientation",
           "interval": "Refresh every"
         },
         "data_description": {
-          "weather_entity": "Current weather and 3-day forecast on the left.",
-          "waste_entities": "e.g. Waste Collection Schedule. Colour is derived from the name.",
-          "calendar_entities": "Events or birthdays; duplicates are merged.",
-          "value_entities": "Any entities, e.g. temperatures, locks, battery.",
           "interval": "The frame only redraws when something changed."
         }
       },

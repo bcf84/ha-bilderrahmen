@@ -10,25 +10,14 @@
           "port": "Port"
         }
       },
-      "content": {
-        "title": "Inhalte",
-        "description": "Wähle aus, was auf dem Rahmen erscheinen soll. Leere Felder werden ausgeblendet.",
+      "display": {
+        "title": "Anzeige",
+        "description": "Das Layout gestaltest du im Editor „Bilderrahmen“ in der Seitenleiste.",
         "data": {
-          "weather_entity": "Wetter",
-          "waste_entities": "Müllabfuhr-Sensoren",
-          "calendar_entities": "Kalender",
-          "calendar_title": "Überschrift Kalender",
-          "calendar_days": "Kalender: Tage im Voraus",
-          "value_entities": "Weitere Werte",
-          "values_title": "Überschrift Werte",
           "rotation": "Einbaulage",
           "interval": "Aktualisieren alle"
         },
         "data_description": {
-          "weather_entity": "Aktuelles Wetter und 3-Tage-Vorschau links.",
-          "waste_entities": "z. B. Waste Collection Schedule. Farbe wird aus dem Namen erkannt (Rest, Bio, Gelb, Papier).",
-          "calendar_entities": "Termine oder Geburtstage. Doppelte Einträge werden zusammengefasst.",
-          "value_entities": "Beliebige Entitäten, z. B. Temperaturen, Türschloss, Akkustand.",
           "interval": "Der Rahmen wird nur neu gezeichnet, wenn sich etwas geändert hat."
         }
       }
@@ -45,29 +34,18 @@
       "init": {
         "title": "Bilderrahmen",
         "menu_options": {
-          "content": "Inhalte und Anzeige",
+          "display": "Anzeige und Intervall",
           "connection": "Verbindung zum Rahmen"
         }
       },
-      "content": {
-        "title": "Inhalte",
-        "description": "Wähle aus, was auf dem Rahmen erscheinen soll. Leere Felder werden ausgeblendet.",
+      "display": {
+        "title": "Anzeige",
+        "description": "Das Layout gestaltest du im Editor „Bilderrahmen“ in der Seitenleiste.",
         "data": {
-          "weather_entity": "Wetter",
-          "waste_entities": "Müllabfuhr-Sensoren",
-          "calendar_entities": "Kalender",
-          "calendar_title": "Überschrift Kalender",
-          "calendar_days": "Kalender: Tage im Voraus",
-          "value_entities": "Weitere Werte",
-          "values_title": "Überschrift Werte",
           "rotation": "Einbaulage",
           "interval": "Aktualisieren alle"
         },
         "data_description": {
-          "weather_entity": "Aktuelles Wetter und 3-Tage-Vorschau links.",
-          "waste_entities": "z. B. Waste Collection Schedule. Farbe wird aus dem Namen erkannt (Rest, Bio, Gelb, Papier).",
-          "calendar_entities": "Termine oder Geburtstage. Doppelte Einträge werden zusammengefasst.",
-          "value_entities": "Beliebige Entitäten, z. B. Temperaturen, Türschloss, Akkustand.",
           "interval": "Der Rahmen wird nur neu gezeichnet, wenn sich etwas geändert hat."
         }
       },

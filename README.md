@@ -1,11 +1,10 @@
 # E-Paper Bilderrahmen für Home Assistant
 
-Zeigt ausgewählte Inhalte aus Home Assistant auf einem **Waveshare 7.3" E6 PhotoPainter** (Spectra 6, 800 × 480) mit Raspberry Pi Zero an – komplett per Oberfläche einstellbar.
+Zeigt ein frei gestaltbares Layout aus Home Assistant auf einem **Waveshare 7.3" E6 PhotoPainter** (Spectra 6, 800 × 480) mit Raspberry Pi Zero an.
 
-- **Wetter** mit 3-Tage-Vorschau
-- **Müllabfuhr** (z. B. Waste Collection Schedule), Tonnenfarbe wird aus dem Namen erkannt
-- **Kalender / Geburtstage** aus beliebig vielen Kalendern, doppelte Einträge werden zusammengefasst
-- **Weitere Werte** – beliebige Entitäten (Temperaturen, Schlösser, Akkus …)
+- **Grafischer Layout-Editor** in der Seitenleiste („Bilderrahmen“): Elemente per Drag & Drop platzieren, Größe ziehen, Hilfslinien, Rückgängig, Live-Vorschau in den echten sechs Farben
+- **Elemente:** Datum, Wetter jetzt, Wettervorhersage, Müllabfuhr, Kalender, Einzelwert, Werteliste, To-do-Liste, Text, Linie
+- **Modernes Design:** Inter-Schrift, Material-Design-Icons, Karten (umrandet, gefüllt, Akzent), hell oder dunkel, frei wählbare Akzentfarbe
 - Knopf **„Jetzt aktualisieren“**, Vorschaubild und Status direkt in Home Assistant
 - Der Rahmen wird nur neu gezeichnet, wenn sich etwas geändert hat
 
@@ -26,9 +25,8 @@ Am Ende zeigt das Skript Adresse und Port (Standard `8765`) an.
 1. Über HACS / Marketplace dieses Repository als benutzerdefiniertes Repository (Typ *Integration*) hinzufügen und herunterladen.
 2. Home Assistant neu starten.
 3. *Einstellungen → Geräte & Dienste → Integration hinzufügen → E-Paper Bilderrahmen*.
-4. Adresse des Pi eingeben (z. B. `frame.local` oder die IP), dann Inhalte auswählen.
-
-Inhalte ändern: *Geräte & Dienste → E-Paper Bilderrahmen → Konfigurieren*. Nach dem Speichern wird der Rahmen sofort neu gezeichnet.
+4. Adresse des Pi eingeben (z. B. `frame.local` oder die IP), Einbaulage und Intervall wählen.
+5. In der Seitenleiste **Bilderrahmen** öffnen und das Layout gestalten. „Speichern & anzeigen“ schickt es sofort an den Rahmen.
 
 ## Entitäten
 
@@ -49,4 +47,4 @@ Protokoll auf dem Pi: `journalctl -u bilderrahmen -f`
 
 ## Lizenz
 
-MIT. Enthält die Schrift DejaVu Sans (Bitstream-Vera-Lizenz, siehe `fonts/LICENSE.txt`).
+MIT. Enthält die Schrift Inter (SIL Open Font License) und Material Design Icons (Pictogrammers Free License / Apache 2.0), siehe `fonts/`.
