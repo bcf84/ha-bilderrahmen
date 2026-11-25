@@ -29,7 +29,7 @@ def battery_icon(d, cx, cy):
 
 
 def wifi_off_icon(d, cx, cy):
-    for i, r in enumerate((150, 105, 60)):
+    for r in (150, 105, 60):
         d.arc([cx - r, cy - r + 60, cx + r, cy + r + 60], start=225, end=315, fill=BLACK, width=14)
     d.ellipse([cx - 14, cy + 46, cx + 14, cy + 74], fill=BLACK)
     d.line([cx - 120, cy - 60, cx + 120, cy + 90], fill=RED, width=16)
