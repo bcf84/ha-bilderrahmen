@@ -39,8 +39,9 @@ ON = {"black": "white", "white": "black", "red": "white", "blue": "white",
       "green": "white", "yellow": "black"}
 
 THEMES = {
-    "light": {"bg": (238, 239, 238), "card": (255, 255, 255), "line": "black", "fg": "black"},
+    "light": {"bg": (255, 255, 255), "card": (255, 255, 255), "line": "black", "fg": "black"},
     "white": {"bg": (255, 255, 255), "card": (255, 255, 255), "line": "black", "fg": "black"},
+    "paper": {"bg": (236, 236, 236), "card": (255, 255, 255), "line": "black", "fg": "black"},
     "dark": {"bg": (44, 46, 52), "card": (66, 69, 76), "line": "white", "fg": "white"},
 }
 # Weiche Kartenfarben (oben, unten)
@@ -775,6 +776,34 @@ def _palette_image(colors: dict[str, tuple[int, int, int]]) -> Image.Image:
     return pal
 
 
+_BAYER8 = [
+    [0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21],
+]
+
+
+@lru_cache(maxsize=1)
+def _threshold() -> Image.Image:
+    tile = Image.new("L", (8, 8))
+    tile.putdata([int((v + 0.5) * 4) for row in _BAYER8 for v in row])
+    full = Image.new("L", (W, H))
+    for yy in range(0, H, 8):
+        for xx in range(0, W, 8):
+            full.paste(tile, (xx, yy))
+    return full
+
+
+def _ordered_bw(gray: Image.Image) -> Image.Image:
+    """Gleichmäßiges Raster (Bayer) für Grautöne – ohne Streifenmuster."""
+    th = _threshold()
+    if gray.size != th.size:
+        th = th.resize(gray.size)
+    diff = ImageChops.subtract(gray, th, scale=1.0, offset=128)
+    return diff.point(lambda v: 255 if v >= 128 else 0).convert("RGB")
+
+
 def _dither(paint: Image.Image) -> Image.Image:
     """Floyd-Steinberg auf die gemessenen Panelfarben, Ausgabe in reinen Farben.
 
@@ -788,7 +817,7 @@ def _dither(paint: Image.Image) -> Image.Image:
     q = paint.point(lut).quantize(palette=_palette_image(SEEN), dither=Image.Dither.FLOYDSTEINBERG)
     q.putpalette(_palette_image(PURE).getpalette())
     color = q.convert("RGB")
-    bw = paint.convert("L").convert("1", dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
+    bw = _ordered_bw(paint.convert("L"))
     r, g, b = paint.split()
     chroma = ImageChops.subtract(ImageChops.lighter(ImageChops.lighter(r, g), b),
                                  ImageChops.darker(ImageChops.darker(r, g), b))

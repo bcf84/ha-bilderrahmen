@@ -137,7 +137,7 @@ CATALOG_BY_TYPE = {c["type"]: c for c in CATALOG}
 
 THEME_FIELDS = [
     {"key": "mode", "label": "Hintergrund", "type": "select", "default": "light",
-     "options": [{"value": "light", "label": "Papier"}, {"value": "white", "label": "Weiß"},
+     "options": [{"value": "light", "label": "Hell"}, {"value": "paper", "label": "Papiergrau"},
                  {"value": "dark", "label": "Dunkel"}]},
     {"key": "accent", "label": "Akzentfarbe", "type": "select", "default": "red",
      "options": [{"value": "red", "label": "Rot"}, {"value": "blue", "label": "Blau"},
@@ -244,7 +244,7 @@ def sanitize(layout: Any) -> dict[str, Any]:
         raise ValueError("Layout muss ein Objekt sein")
     theme_in = layout.get("theme") if isinstance(layout.get("theme"), dict) else {}
     theme = {
-        "mode": theme_in.get("mode") if theme_in.get("mode") in ("light", "white", "dark") else "light",
+        "mode": theme_in.get("mode") if theme_in.get("mode") in ("light", "white", "paper", "dark") else "light",
         "accent": theme_in.get("accent") if theme_in.get("accent") in
         ("red", "blue", "green", "yellow", "black", "white") else "red",
     }

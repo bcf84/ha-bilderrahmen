@@ -400,7 +400,7 @@ class BilderrahmenPanel extends HTMLElement {
     const t = this._layout?.theme || {};
     return `<div class="sec"><h2>Design</h2>
       <div class="field"><label>Hintergrund</label><div class="seg" id="mode">
-        ${[["light", "Papier"], ["white", "Weiß"], ["dark", "Dunkel"]].map(([v, l]) => `<button data-v="${v}" class="${(t.mode || "light") === v ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        ${[["light", "Hell"], ["paper", "Papiergrau"], ["dark", "Dunkel"]].map(([v, l]) => `<button data-v="${v}" class="${(t.mode || "light") === v ? "on" : ""}">${l}</button>`).join("")}</div></div>
       <div class="field"><label>Akzentfarbe</label><div class="swatches" id="acc">
         ${Object.entries(ACCENTS).map(([k, c]) => `<div class="swatch ${t.accent === k ? "on" : ""}" data-v="${k}" title="${k}" style="background:${c}"></div>`).join("")}</div></div>
       </div>
