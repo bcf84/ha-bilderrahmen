@@ -9,7 +9,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
-from .layout import CATALOG, THEME_FIELDS
+from .layout import CATALOG, TEMPLATES, THEME_FIELDS
 from .render import H, W
 
 
@@ -27,6 +27,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_preview)
     websocket_api.async_register_command(hass, ws_save)
     websocket_api.async_register_command(hass, ws_push)
+    websocket_api.async_register_command(hass, ws_template)
 
 
 @websocket_api.require_admin
@@ -52,6 +53,7 @@ def ws_get(hass, connection, msg) -> None:
     connection.send_result(msg["id"], {
         "layout": m.layout, "catalog": CATALOG, "theme_fields": THEME_FIELDS,
         "size": [W, H], "status": m.status,
+        "templates": [{"id": k, "label": v} for k, v in TEMPLATES.items()],
     })
 
 
@@ -106,3 +108,18 @@ async def ws_push(hass, connection, msg) -> None:
     await m.async_refresh(force=True)
     connection.send_result(msg["id"], {"status": m.status})
 
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/template",
+    vol.Required("entry_id"): str,
+    vol.Required("name"): str,
+})
+@callback
+def ws_template(hass, connection, msg) -> None:
+    m = _manager(hass, msg["entry_id"])
+    if m is None:
+        connection.send_error(msg["id"], "not_found", "Rahmen nicht gefunden")
+        return
+    connection.send_result(msg["id"], {"layout": m.template(msg["name"])})

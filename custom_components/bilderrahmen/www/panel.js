@@ -40,6 +40,11 @@ aside.right { border-left:1px solid var(--line); }
   gap:6px; cursor:grab; user-select:none; font-size:12.5px; text-align:center; background:var(--panel-bg); transition:.15s; }
 .tile:hover { border-color:var(--accent); color:var(--accent); transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.06); }
 .tile ha-icon { --mdc-icon-size:24px; }
+.templates { display:flex; flex-direction:column; gap:6px; }
+.templates button { text-align:left; border:1px solid var(--line); background:var(--panel-bg); color:var(--primary-text-color);
+  border-radius:10px; padding:9px 12px; cursor:pointer; font-size:13.5px; display:flex; align-items:center; gap:8px; }
+.templates button:hover { border-color:var(--accent); color:var(--accent); }
+.templates ha-icon { --mdc-icon-size:18px; }
 .layers { display:flex; flex-direction:column; gap:2px; }
 .layer { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; font-size:13.5px; }
 .layer:hover { background:var(--secondary-background-color, #f5f5f5); }
@@ -164,7 +169,7 @@ class BilderrahmenPanel extends HTMLElement {
 
   async _load() {
     const r = await this._ws({ type: "bilderrahmen/get", entry_id: this._entry });
-    this._catalog = r.catalog; this._themeFields = r.theme_fields; this._layout = r.layout;
+    this._catalog = r.catalog; this._themeFields = r.theme_fields; this._layout = r.layout; this._templates = r.templates || [];
     this._byType = Object.fromEntries(this._catalog.map((c) => [c.type, c]));
     this._sel = null; this._undo = []; this._redo = []; this._setDirty(false);
     this._status(r.status);
@@ -190,6 +195,7 @@ class BilderrahmenPanel extends HTMLElement {
       <div class="body">
         <aside class="left">
           <div class="sec"><h2>Elemente</h2><div class="palette" id="palette"></div></div>
+          <div class="sec"><h2>Vorlagen</h2><div class="templates" id="templates"></div></div>
           <div class="sec"><h2>Ebenen</h2><div class="layers" id="layers"></div></div>
         </aside>
         <main id="main">
@@ -294,7 +300,7 @@ class BilderrahmenPanel extends HTMLElement {
     const fs = this.$("frameSel");
     fs.hidden = this._frames.length < 2;
     fs.innerHTML = this._frames.map((f) => `<option value="${f.entry_id}" ${f.entry_id === this._entry ? "selected" : ""}>${esc(f.title)}</option>`).join("");
-    this._renderPalette(); this._renderBoxes(); this._renderLayers(); this._renderProps(); this._updUndo(); this._fit();
+    this._renderPalette(); this._renderTemplates(); this._renderBoxes(); this._renderLayers(); this._renderProps(); this._updUndo(); this._fit();
   }
 
   _renderPalette() {
@@ -304,6 +310,19 @@ class BilderrahmenPanel extends HTMLElement {
     p.querySelectorAll(".tile").forEach((t) => {
       t.onclick = () => this._add(t.dataset.type);
       t.ondragstart = (e) => { e.dataTransfer.setData("text/bilderrahmen", t.dataset.type); e.dataTransfer.effectAllowed = "copy"; };
+    });
+  }
+
+  _renderTemplates() {
+    const T = this.$("templates");
+    T.innerHTML = this._templates.map((t) => `<button data-t="${t.id}"><ha-icon icon="${t.id === "station" ? "mdi:weather-partly-cloudy" : "mdi:view-dashboard-outline"}"></ha-icon>${esc(t.label)}</button>`).join("");
+    T.querySelectorAll("button").forEach((b) => b.onclick = async () => {
+      if (this._layout.widgets.length && !confirm("Aktuelles Layout durch die Vorlage ersetzen? (Rückgängig mit Strg+Z möglich)")) return;
+      try {
+        const r = await this._ws({ type: "bilderrahmen/template", entry_id: this._entry, name: b.dataset.t });
+        this._snapshot(); this._layout = r.layout; this._sel = null; this._afterChange();
+        this._toast("Vorlage geladen – mit „Speichern & anzeigen“ übernehmen");
+      } catch (e) { this._toast("Vorlage fehlgeschlagen: " + (e.message || e)); }
     });
   }
 

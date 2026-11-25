@@ -87,6 +87,18 @@
       },
       "status": {
         "name": "Status"
+      },
+      "wifi_signal": {
+        "name": "WLAN-Signal"
+      },
+      "battery": {
+        "name": "Akku"
+      },
+      "battery_voltage": {
+        "name": "Akkuspannung"
+      },
+      "cpu_temperature": {
+        "name": "CPU-Temperatur"
       }
     }
   }

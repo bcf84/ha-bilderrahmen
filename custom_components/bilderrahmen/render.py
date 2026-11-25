@@ -39,7 +39,7 @@ ON = {"black": "white", "white": "black", "red": "white", "blue": "white",
       "green": "white", "yellow": "black"}
 
 THEMES = {
-    "light": {"bg": (242, 242, 240), "card": (255, 255, 255), "line": "black", "fg": "black"},
+    "light": {"bg": (238, 239, 238), "card": (255, 255, 255), "line": "black", "fg": "black"},
     "white": {"bg": (255, 255, 255), "card": (255, 255, 255), "line": "black", "fg": "black"},
     "dark": {"bg": (44, 46, 52), "card": (66, 69, 76), "line": "white", "fg": "white"},
 }
@@ -228,12 +228,15 @@ def _cloud(ctx: Ctx, cx, cy, s, dark=False) -> None:
     """Wolke mit Breite ≈ 2s, Mittelpunkt (cx, cy)."""
     if ctx.mode != "paint":
         return
-    w, h = int(2.1 * s), int(1.35 * s)
+    w = int(2.0 * s)
+    h = int(w * 0.64)
+    if w < 4 or h < 4:
+        return
     m = Image.new("L", (w, h), 0)
     md = ImageDraw.Draw(m)
-    for px, py, r in ((0.32, 0.66, 0.3), (0.55, 0.45, 0.42), (0.8, 0.68, 0.26)):
-        md.ellipse([(px * w - r * w), (py * h - r * w), (px * w + r * w), (py * h + r * w)], fill=255)
-    md.rounded_rectangle([0.06 * w, 0.62 * h, 0.94 * w, 0.98 * h], radius=0.18 * h, fill=255)
+    for px, py, r in ((0.29, 0.64, 0.19), (0.53, 0.44, 0.27), (0.76, 0.63, 0.17)):
+        md.ellipse([px * w - r * w, py * h - r * w, px * w + r * w, py * h + r * w], fill=255)
+    md.rounded_rectangle([0.1 * w, 0.58 * h, 0.9 * w, 0.97 * h], radius=0.2 * h, fill=255)
     t, b = (DARK_T, DARK_B) if dark else (CLOUD_T, CLOUD_B)
     ctx.grad_shape((cx - w / 2, cy - h / 2, w, h), t, b, mask=m)
 
@@ -367,13 +370,13 @@ def w_date(ctx: Ctx, box, props, data, today: date):
     ax = {"left": x, "center": x + w / 2, "right": x + w}[align]
     a1 = {"left": "ls", "center": "ms", "right": "rs"}[align]
     if title:
-        s1 = int(h * 0.52)
+        s1 = int(h * 0.56)
         while s1 > 14 and ctx.tw(title, font(s1, "medium")) > w:
             s1 -= 2
-        s2 = max(12, int(h * 0.27))
-        ctx.text((ax, y + s1 * 0.95), title, font(s1, "medium"), fg, anchor=a1)
-        ctx.text((ax, y + h - 2), ctx.fit(date_s, font(s2, "regular"), w), font(s2, "regular"), fg,
-                 anchor={"left": "ld", "center": "md", "right": "rd"}[align])
+        s2 = max(12, int(h * 0.3))
+        ctx.text((ax, y + s1 * 0.82), title, font(s1, "medium"), fg, anchor=a1)
+        ctx.text((ax, y + s1 * 0.82 + s2 * 1.15), ctx.fit(date_s, font(s2, "regular"), w), font(s2, "regular"), fg,
+                 anchor=a1)
     else:
         top = WD[today.weekday()]
         bottom = f"{today.day}. {MONTHS[today.month - 1]}" + (f" {today.year}" if props.get("show_year") else "")
@@ -392,35 +395,38 @@ def w_weather_now(ctx: Ctx, box, props, data, today):
     x, y, w, h = inner
     now = (data or {}).get("now")
     if not now:
-        _empty(ctx, inner, "Wetter nicht verfügbar", fg)
+        ctx.icon(x + h / 2, y + h / 2, "weather-cloudy-alert", h * 0.6, "fg")
+        ctx.text((x + h + 10, y + h / 2), "Wetterdaten nicht verfügbar", font(18, "regular"), fg, anchor="lm")
         return
-    isz = min(h * 0.95, w * 0.42)
+    isz = min(h, w * 0.44)
     wx_icon(ctx, x + isz / 2, y + h / 2, isz, now.get("cond"))
-    tx = x + isz + max(14, w * 0.05)
-    avail = x + w - tx
+    tx0 = x + isz + 8
+    cx = (tx0 + x + w) / 2
+    avail = x + w - tx0
     t = fmt_temp(now.get("temp")).rstrip("°")
-    size = int(h * 0.62)
-    unit_f = font(max(14, size * 0.3), "regular")
-    while size > 20 and ctx.tw(t, font(size, "light")) + ctx.tw("°C", unit_f) > avail:
+    size = int(h * 0.56)
+    uf = font(max(14, size * 0.36), "regular")
+    while size > 20 and ctx.tw(t, font(size, "regular")) + ctx.tw("°C", uf) + 4 > avail:
         size -= 2
-        unit_f = font(max(14, size * 0.3), "regular")
-    small = max(14, int(h * 0.13))
-    cap = size * 0.7
-    block = cap + 12 + small * (2.6 if (data or {}).get("today") else 1.2)
-    base = y + (h - block) / 2 + cap
-    tf = font(size, "light")
-    ctx.text((tx - size * 0.03, base), t, tf, fg, anchor="ls")
-    ctx.text((tx + ctx.tw(t, tf) + 2, base - cap + unit_f.size * 0.8), "°C", unit_f, fg, anchor="ls")
-    line = base + 12 + small
-    sub = COND.get(now.get("cond"), now.get("cond") or "")
+        uf = font(max(14, size * 0.36), "regular")
+    tf = font(size, "regular")
+    total = ctx.tw(t, tf) + 3 + ctx.tw("°C", uf)
+    sub = []
+    if props.get("show_condition"):
+        sub.append(COND.get(now.get("cond"), now.get("cond") or ""))
     if now.get("feels") is not None:
-        sub += f" · gefühlt {fmt_temp(now['feels'])}"
-    ctx.text((tx, line), ctx.fit(sub, font(small, "regular"), avail), font(small, "regular"), fg, anchor="ls")
-    td = (data or {}).get("today")
-    if td:
-        line += small * 1.5
-        s = f"{fmt_temp(td.get('hi'))} / {fmt_temp(td.get('lo'))}"
-        ctx.text((tx, line), s, font(small, "medium"), fg, anchor="ls")
+        sub.append(f"Gefühlt {fmt_temp(now['feels'])}")
+    elif not sub:
+        sub.append(COND.get(now.get("cond"), now.get("cond") or ""))
+    small = max(13, int(h * 0.12))
+    cap = size * 0.7
+    block = cap + 14 + small
+    base = y + (h - block) / 2 + cap
+    sx = cx - total / 2
+    ctx.text((sx, base), t, tf, fg, anchor="ls")
+    ctx.text((sx + ctx.tw(t, tf) + 3, base - cap + uf.size * 0.72), "°C", uf, fg, anchor="ls")
+    ctx.text((cx, base + 14 + small * 0.85), ctx.fit(" · ".join(sub), font(small, "regular"), avail),
+             font(small, "regular"), fg, anchor="ms")
 
 
 def w_weather_details(ctx: Ctx, box, props, data, today):
@@ -429,25 +435,31 @@ def w_weather_details(ctx: Ctx, box, props, data, today):
     x, y, w, h = inner
     items = (data or {}).get("items") or []
     if not items:
-        _empty(ctx, inner, "Keine Details", fg)
+        _empty(ctx, inner, "Angaben wählen", fg)
         return
     cols = max(1, int(props.get("columns", 2)))
     rows = math.ceil(len(items) / cols)
     cw, rh = w / cols, h / rows
-    isz = min(rh * 0.62, 34)
+    isz = min(rh * 0.78, 34)
+    lf = font(max(11, min(15, rh * 0.3)), "regular")
+    vf = font(max(13, min(22, rh * 0.46)), "medium")
+    uf = font(max(10, min(13, rh * 0.27)), "regular")
     for i, it in enumerate(items):
-        cx0 = x + (i % cols) * cw
+        c0 = x + (i % cols) * cw
         cy = y + (i // cols) * rh + rh / 2
-        ctx.icon(cx0 + isz / 2, cy, it.get("icon"), isz, it.get("color", "fg") if fg == ctx.fg else fg)
-        tx = cx0 + isz + 12
-        lf = font(max(11, rh * 0.25), "regular")
-        vf = font(max(13, rh * 0.36), "medium")
-        uf = font(max(10, rh * 0.22), "regular")
-        ctx.text((tx, cy - 2), ctx.fit(it.get("label", ""), lf, cw - isz - 16), lf, fg, anchor="ls")
+        col = it.get("color", "fg") if fg == ctx.fg else fg
+        ctx.icon(c0 + isz / 2 + 4, cy, it.get("icon"), isz, col)
+        tx0 = c0 + isz + 12
+        mid = (tx0 + c0 + cw) / 2
+        tw_ = c0 + cw - tx0
+        ctx.text((mid, cy - 1), ctx.fit(it.get("label", ""), lf, tw_), lf, fg, anchor="ms")
         v = str(it.get("value", "–"))
-        ctx.text((tx, cy + 1), v, vf, fg, anchor="lt")
-        if it.get("unit"):
-            ctx.text((tx + ctx.tw(v, vf) + 3, cy + 1 + vf.size * 0.36), it["unit"], uf, fg, anchor="lt")
+        u = str(it.get("unit") or "")
+        total = ctx.tw(v, vf) + (ctx.tw(u, uf) + 2 if u else 0)
+        vx = mid - total / 2
+        ctx.text((vx, cy + vf.size * 0.95), v, vf, fg, anchor="ls")
+        if u:
+            ctx.text((vx + ctx.tw(v, vf) + 2, cy + vf.size * 0.95), u, uf, fg, anchor="ls")
 
 
 def w_weather_forecast(ctx: Ctx, box, props, data, today):
@@ -459,22 +471,28 @@ def w_weather_forecast(ctx: Ctx, box, props, data, today):
         _empty(ctx, inner, "Keine Vorhersage", fg)
         return
     n = len(days)
-    gap = int(props.get("gap", 10))
+    gap = int(props.get("gap", 12))
     cw = (w - gap * (n - 1)) / n
-    lbl = max(13, min(22, h * 0.15))
-    tsz = max(12, min(19, h * 0.12))
+    lbl = max(13, min(20, h * 0.16))
+    tsz = max(11, min(16, h * 0.12))
+    filled = props.get("boxes", "outline") == "card"
     for i, f in enumerate(days):
         bx = (int(x + i * (cw + gap)), int(y), int(cw), int(h))
-        ctx.soft(bx, ctx.t["card"], radius=10)
-        ctx.outline(bx, radius=10)
+        if filled:
+            ctx.soft(bx, ctx.t["card"], radius=8)
+        if props.get("boxes", "outline") != "none":
+            ctx.outline(bx, radius=8, color="fg")
         cx = bx[0] + cw / 2
-        ctx.text((cx, y + 8 + lbl), WD_SHORT[f["date"].weekday()], font(lbl, "medium"), "fg", anchor="ms")
-        top = y + lbl + 16
-        bottom = y + h - tsz - 14
-        isz = max(16, min(cw * 0.78, bottom - top))
+        ctx.text((cx, y + 6 + lbl), WD_SHORT[f["date"].weekday()], font(lbl, "medium"), "fg", anchor="ms")
+        top = y + lbl + 12
+        bottom = y + h - tsz - 12
+        isz = max(16, min(cw * 0.74, (bottom - top) * 1.15))
         wx_icon(ctx, cx, (top + bottom) / 2, isz, f.get("cond"))
         s = f"{fmt_temp(f.get('hi'))} / {fmt_temp(f.get('lo'))}"
-        ctx.text((cx, y + h - 9), ctx.fit(s, font(tsz, "regular"), cw - 6), font(tsz, "regular"), "fg", anchor="md")
+        ctx.text((cx, y + h - 8), ctx.fit(s, font(tsz, "regular"), cw - 6), font(tsz, "regular"), "fg", anchor="md")
+
+
+LINE_ORANGE = (244, 150, 66)
 
 
 def w_weather_chart(ctx: Ctx, box, props, data, today):
@@ -485,45 +503,75 @@ def w_weather_chart(ctx: Ctx, box, props, data, today):
     if len(pts) < 2:
         _empty(ctx, inner, "Keine stündliche Vorhersage", fg)
         return
-    lf = font(13, "regular")
-    left, right, bottom = 30, 34, 20
-    gx, gy, gw, gh = x + left, y + 4, w - left - right, h - bottom - 6
-    temps = [p.get("temp") for p in pts if p.get("temp") is not None]
-    tmin, tmax = min(temps), max(temps)
+    lf = font(12, "regular")
+    left, right, bottom = 34, 38, 18
+    gx, gy, gw, gh = x + left, y + 2, w - left - right, h - bottom - 4
+    temps = [p["temp"] for p in pts if p.get("temp") is not None]
+    tmin, tmax = math.floor(min(temps)), math.ceil(max(temps))
     if tmax - tmin < 4:
         mid = (tmax + tmin) / 2
-        tmin, tmax = mid - 2, mid + 2
+        tmin, tmax = math.floor(mid - 2), math.ceil(mid + 2)
     n = len(pts)
     X = [gx + i * gw / (n - 1) for i in range(n)]
-    Y = [gy + gh - ((p.get("temp", tmin) - tmin) / (tmax - tmin)) * gh * 0.82 - gh * 0.09 for p in pts]
-    # Regenwahrscheinlichkeit als weiche Balken
-    bw = max(2, gw / n * 0.55)
+    Y = [gy + gh - (p.get("temp", tmin) - tmin) / (tmax - tmin) * gh for p in pts]
+    bw = max(2, gw / n * 0.62)
     for i, p in enumerate(pts):
         pr = p.get("rain")
         if pr:
             bh = gh * min(1, pr / 100)
-            ctx.soft((X[i] - bw / 2, gy + gh - bh, bw, bh), (150, 182, 240))
-    # Fläche unter der Kurve
+            ctx.soft((X[i] - bw / 2, gy + gh - bh, bw, bh), (150, 160, 190))
     if ctx.mode == "paint":
         poly = list(zip(X, Y, strict=True)) + [(X[-1], gy + gh), (X[0], gy + gh)]
         m = Image.new("L", (W, H), 0)
         ImageDraw.Draw(m).polygon(poly, fill=255)
-        g = Image.linear_gradient("L").resize((W, int(gh) + 2))
-        fill = Image.new("RGB", (W, H), (255, 226, 196))
-        lower = Image.new("RGB", (W, H), _lerp((255, 255, 255), ctx.t["bg"], 0.5))
-        gm = Image.new("L", (W, H), 0)
-        gm.paste(g, (0, int(gy)))
-        ctx.paint.paste(Image.composite(lower, fill, gm), (0, 0), m)
-    ctx.line(list(zip(X, Y, strict=True)), "red", 3)
-    ctx.line([gx, gy + gh, gx + gw, gy + gh], "fg", 1)
-    # Beschriftung
-    ctx.text((x, gy + 6), fmt_temp(tmax), lf, fg, anchor="lm")
-    ctx.text((x, gy + gh - 4), fmt_temp(tmin), lf, fg, anchor="lm")
-    ctx.text((x + w, gy + 6), "100%", lf, fg, anchor="rm")
-    ctx.text((x + w, gy + gh - 4), "0%", lf, fg, anchor="rm")
-    step = max(1, round(n / 8))
-    for i in range(0, n, step):
+        ctx.paint.paste(Image.new("RGB", (W, H), (255, 228, 200)), (0, 0), m)
+        ctx.pd.line(list(zip(X, Y, strict=True)), fill=LINE_ORANGE, width=4, joint="curve")
+    ctx.text((x + left - 6, gy), fmt_temp(tmax), lf, fg, anchor="rt")
+    ctx.text((x + left - 6, gy + gh), fmt_temp(tmin), lf, fg, anchor="rs")
+    ctx.text((x + w, gy), "100%", lf, fg, anchor="rt")
+    ctx.text((x + w, gy + gh), "0%", lf, fg, anchor="rs")
+    every = int(props.get("label_every", 2))
+    for i in range(0, n, max(1, every)):
         ctx.text((X[i], y + h), pts[i].get("label", ""), lf, fg, anchor="md")
+
+
+def w_status(ctx: Ctx, box, props, data, today):
+    """Statuszeile: Aktualisierungszeit, WLAN und Akku des Rahmens."""
+    (x, y, w, h), fg = _card(ctx, box, props, "none")
+    d = data or {}
+    f = font(max(11, min(16, h * 0.62)), "regular")
+    isz = f.size * 1.35
+    cy = y + h / 2
+    parts = []
+    if props.get("show_time", True) and d.get("time"):
+        parts.append(("refresh", d["time"], "fg"))
+    wifi = d.get("wifi")
+    if props.get("show_wifi", True):
+        if wifi and wifi.get("dbm") is not None:
+            dbm = wifi["dbm"]
+            lvl = 4 if dbm >= -55 else 3 if dbm >= -65 else 2 if dbm >= -75 else 1
+            parts.append((f"wifi-strength-{lvl}", wifi.get("label", ""), "fg"))
+        elif wifi is not None:
+            parts.append(("wifi-strength-off-outline", "Kein WLAN", "red"))
+    bat = d.get("battery")
+    if props.get("show_battery", True) and bat:
+        pct = bat.get("percent")
+        if pct is None:
+            parts.append(("power-plug-outline", "Netz", "fg"))
+        else:
+            step = max(10, min(100, int(round(pct / 10.0)) * 10))
+            name = "battery" if step == 100 else f"battery-{step}"
+            if bat.get("charging"):
+                name = "battery-charging-" + str(max(10, step)) if step < 100 else "battery-charging-100"
+            parts.append((name, f"{round(pct)} %", "red" if pct < 20 and not bat.get("charging") else "fg"))
+    widths = [isz + 4 + ctx.tw(t, f) for _, t, _ in parts]
+    total = sum(widths) + 16 * max(0, len(parts) - 1)
+    align = props.get("align", "right")
+    cx = x if align == "left" else (x + (w - total) / 2 if align == "center" else x + w - total)
+    for (ic, t, c), wd in zip(parts, widths, strict=True):
+        ctx.icon(cx + isz / 2, cy, ic, isz, c)
+        ctx.text((cx + isz + 4, cy + 1), t, f, c if c == "red" else fg, anchor="lm")
+        cx += wd + 16
 
 
 def w_waste(ctx: Ctx, box, props, data, today):
@@ -713,7 +761,7 @@ WIDGETS = {
     "date": w_date, "weather_now": w_weather_now, "weather_details": w_weather_details,
     "weather_forecast": w_weather_forecast, "weather_chart": w_weather_chart,
     "waste": w_waste, "calendar": w_calendar, "entity": w_entity, "entities": w_entities,
-    "todo": w_todo, "text": w_text, "divider": w_divider,
+    "todo": w_todo, "text": w_text, "divider": w_divider, "status": w_status,
 }
 
 

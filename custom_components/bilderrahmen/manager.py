@@ -41,7 +41,7 @@ from .const import (
     DEFAULT_ROTATION,
     DOMAIN,
 )
-from .layout import default_layout, sanitize
+from .layout import default_layout, sanitize, station_layout
 from .render import WD_SHORT, render_image, simulate, to_png
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,6 +109,13 @@ def _when(d: date, today: date) -> str:
     return f"{WD_SHORT[d.weekday()]} {d:%d.%m.}"
 
 
+def _compass(deg: Any) -> str:
+    try:
+        return ["N", "NO", "O", "SO", "S", "SW", "W", "NW"][int((float(deg) % 360 + 22.5) // 45) % 8]
+    except (TypeError, ValueError):
+        return ""
+
+
 def _fmt_number(v: float) -> str:
     s = f"{round(v):d}" if v.is_integer() or abs(v) >= 100 else f"{v:.1f}"
     return s.replace(".", ",")
@@ -130,6 +137,7 @@ class FrameManager:
         self._listeners: list[Callable[[], None]] = []
         self._unsubs: list[CALLBACK_TYPE] = []
         self._store: Store = Store(hass, 1, f"{DOMAIN}.layout.{entry.entry_id}")
+        self.device: dict[str, Any] = {}  # vom Pi gemeldet: WLAN, Akku, CPU …
 
     # ------------------------------------------------------------ Optionen
     def _opt(self, key: str, default: Any = None) -> Any:
@@ -174,6 +182,24 @@ class FrameManager:
         self.hass.async_create_background_task(self.async_refresh(force=True), "bilderrahmen_save")
         return self.layout
 
+    def template(self, name: str) -> dict[str, Any]:
+        weathers = [e for e in self.hass.states.async_entity_ids("weather")
+                    if (st := self.hass.states.get(e)) and st.state not in ("unavailable", "unknown")]
+        weather = weathers[0] if weathers else None
+        title = ""
+        if weather and (st := self.hass.states.get(weather)):
+            title = re.split(r"[/,(]", st.name or "")[0].strip()
+        if name == "station":
+            a = self.hass.states.get(weather).attributes if weather else {}
+            keys = {"wind": "wind_speed", "humidity": "humidity", "pressure": "pressure", "uv": "uv_index",
+                    "visibility": "visibility", "clouds": "cloud_coverage", "gusts": "wind_gust_speed",
+                    "dew_point": "dew_point", "feels": "apparent_temperature"}
+            avail = [k for k, attr in keys.items() if a.get(attr) is not None]
+            if self.hass.states.get("sun.sun"):
+                avail += ["sunrise", "sunset"]
+            return station_layout(weather, title or self.hass.config.location_name, available=avail)
+        return default_layout(weather=weather)
+
     async def async_preview(self, layout: dict[str, Any]) -> bytes:
         lay = sanitize(layout)
         data, errors = await self._collect(lay)
@@ -187,6 +213,7 @@ class FrameManager:
     async def async_start(self) -> None:
         interval = timedelta(minutes=int(self._opt(CONF_INTERVAL, DEFAULT_INTERVAL)))
         self._unsubs.append(async_track_time_interval(self.hass, self._scheduled, interval))
+        self._unsubs.append(async_track_time_interval(self.hass, self._poll_device, timedelta(minutes=5)))
         self._unsubs.append(
             async_track_time_change(self.hass, self._scheduled, hour=0, minute=0, second=30)
         )
@@ -210,6 +237,24 @@ class FrameManager:
     @callback
     def _scheduled(self, _now: Any = None) -> None:
         self.hass.async_create_background_task(self.async_refresh(force=False), "bilderrahmen_refresh")
+
+    @callback
+    def _poll_device(self, _now: Any = None) -> None:
+        async def run() -> None:
+            await self.async_device_status()
+            self._notify()
+        self.hass.async_create_background_task(run(), "bilderrahmen_status")
+
+    async def async_device_status(self) -> dict[str, Any]:
+        """Fragt WLAN, Akku und Systemwerte beim Pi ab."""
+        session = async_get_clientsession(self.hass)
+        try:
+            async with asyncio.timeout(6):
+                resp = await session.get(f"{self.base_url}/status")
+                self.device = await resp.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            self.device = {}
+        return self.device
 
     def add_listener(self, cb: Callable[[], None]) -> Callable[[], None]:
         self._listeners.append(cb)
@@ -265,7 +310,9 @@ class FrameManager:
                 f"{self.base_url}/display",
                 params={"force": "1" if force else "0"},
                 data=png,
-                headers={"Content-Type": "image/png"},
+                headers={"Content-Type": "image/png",
+                         "X-Refresh-Interval": str(int(self._opt(CONF_INTERVAL, DEFAULT_INTERVAL))),
+                         "X-Rotation": str(self.rotation)},
             )
             resp.raise_for_status()
             try:
@@ -281,6 +328,7 @@ class FrameManager:
         data: dict[str, Any] = {}
         errors: list[str] = []
         weather_cache: dict[str, Any] = {}
+        status_fetched = False
 
         for wd in layout.get("widgets", []):
             t, p, wid = wd["type"], wd.get("props", {}), wd["id"]
@@ -292,7 +340,14 @@ class FrameManager:
                             weather_cache[ent] = await self._weather(ent, today)
                         data[wid] = weather_cache[ent]
                         if t == "weather_details":
-                            data[wid] = {"items": self._details(ent, p.get("items") or [])}
+                            data[wid] = {"items": self._details(ent, p.get("items") or [], p)}
+                elif t == "status":
+                    if not status_fetched:
+                        await self.async_device_status()
+                        status_fetched = True
+                    dev = self.device
+                    data[wid] = {"time": f"{now:%H:%M}", "wifi": dev.get("wifi") if dev else None,
+                                 "battery": dev.get("battery") if dev else None}
                 elif t == "weather_chart":
                     ent = p.get("entity") or next(iter(self.hass.states.async_entity_ids("weather")), None)
                     if ent:
@@ -363,12 +418,23 @@ class FrameManager:
             if rain is None and f.get("precipitation") is not None:
                 rain = min(100, float(f["precipitation"]) * 25)
             out.append({"temp": float(f["temperature"]), "rain": rain,
-                        "label": f"{dt_util.as_local(dt_) if dt_.tzinfo else dt_:%H}"})
+                        "label": f"{(dt_util.as_local(dt_) if dt_.tzinfo else dt_).hour}:00"})
             if len(out) >= hours:
                 break
         return out
 
-    def _details(self, entity_id: str, wanted: list[str]) -> list[dict[str, Any]]:
+    def _sensor(self, entity_id: str | None) -> tuple[str, str]:
+        st = self.hass.states.get(entity_id or "")
+        if st is None:
+            return "–", ""
+        aq = {"excellent": "Sehr gut", "good": "Gut", "fair": "Ordentlich", "moderate": "Mäßig",
+              "poor": "Schlecht", "very_poor": "Sehr schlecht", "extremely_poor": "Sehr schlecht"}
+        if st.state in aq:
+            return aq[st.state], ""
+        return self._fmt_state(st)
+
+    def _details(self, entity_id: str, wanted: list[str], props: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        props = props or {}
         st = self.hass.states.get(entity_id)
         a = st.attributes if st else {}
         sun = self.hass.states.get("sun.sun")
@@ -387,7 +453,9 @@ class FrameManager:
         catalog = {
             "sunrise": ("mdi:weather-sunset-up", "Sonnenaufgang", lambda: (t("next_rising"), ""), "red"),
             "sunset": ("mdi:weather-sunset-down", "Sonnenuntergang", lambda: (t("next_setting"), ""), "red"),
-            "wind": ("mdi:weather-windy", "Wind", lambda: (num(a.get("wind_speed")), a.get("wind_speed_unit", "km/h")), "blue"),
+            "wind": ("mdi:weather-windy", "Wind", lambda: (
+                (_compass(a.get("wind_bearing")) + " " if a.get("wind_bearing") is not None else "") + num(a.get("wind_speed")),
+                a.get("wind_speed_unit", "km/h")), "blue"),
             "humidity": ("mdi:water-percent", "Luftfeuchte", lambda: (num(a.get("humidity")), "%"), "blue"),
             "pressure": ("mdi:gauge", "Luftdruck", lambda: (num(a.get("pressure")), a.get("pressure_unit", "hPa")), "fg"),
             "clouds": ("mdi:weather-cloudy", "Bewölkung", lambda: (num(a.get("cloud_coverage")), "%"), "fg"),
@@ -395,6 +463,10 @@ class FrameManager:
             "visibility": ("mdi:eye-outline", "Sichtweite", lambda: (num(a.get("visibility")), a.get("visibility_unit", "km")), "fg"),
             "dew_point": ("mdi:water-thermometer-outline", "Taupunkt", lambda: (num(a.get("dew_point")), "°"), "blue"),
             "feels": ("mdi:thermometer", "Gefühlt", lambda: (num(a.get("apparent_temperature")), "°"), "red"),
+            "gusts": ("mdi:weather-windy-variant", "Böen", lambda: (num(a.get("wind_gust_speed")), a.get("wind_speed_unit", "km/h")), "blue"),
+            "indoor_temp": ("mdi:home-thermometer-outline", "Innen", lambda: self._sensor(props.get("indoor_temp_entity")), "red"),
+            "indoor_humidity": ("mdi:home-percent-outline", "Innen-Feuchte", lambda: self._sensor(props.get("indoor_humidity_entity")), "blue"),
+            "air_quality": ("mdi:leaf", "Luftqualität", lambda: self._sensor(props.get("air_quality_entity")), "green"),
         }
         items = []
         for k in wanted:

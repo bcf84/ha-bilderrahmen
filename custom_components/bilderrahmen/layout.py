@@ -54,6 +54,9 @@ DETAIL_OPTIONS = [
     {"value": "pressure", "label": "Luftdruck"}, {"value": "clouds", "label": "Bewölkung"},
     {"value": "uv", "label": "UV-Index"}, {"value": "visibility", "label": "Sichtweite"},
     {"value": "dew_point", "label": "Taupunkt"}, {"value": "feels", "label": "Gefühlt"},
+    {"value": "gusts", "label": "Böen"},
+    {"value": "indoor_temp", "label": "Innen-Temperatur"}, {"value": "indoor_humidity", "label": "Innen-Luftfeuchte"},
+    {"value": "air_quality", "label": "Luftqualität"},
 ]
 
 CATALOG: list[dict[str, Any]] = [
@@ -63,22 +66,39 @@ CATALOG: list[dict[str, Any]] = [
                  "options": [{"value": "left", "label": "Links"}, {"value": "center", "label": "Mitte"},
                              {"value": "right", "label": "Rechts"}]},
                 {"key": "show_year", "label": "Jahr anzeigen", "type": "bool", "default": False}, _style("none")]},
-    {"type": "weather_now", "label": "Wetter jetzt", "icon": "mdi:weather-partly-cloudy", "w": 420, "h": 150,
-     "fields": [WEATHER_ENTITY, _title(), _style("none")]},
+    {"type": "weather_now", "label": "Wetter jetzt", "icon": "mdi:weather-partly-cloudy", "w": 360, "h": 160,
+     "fields": [WEATHER_ENTITY,
+                {"key": "show_condition", "label": "Wetterlage als Text", "type": "bool", "default": False},
+                _title(), _style("none")]},
     {"type": "weather_details", "label": "Wetterdetails", "icon": "mdi:weather-windy", "w": 360, "h": 140,
      "fields": [WEATHER_ENTITY,
                 {"key": "items", "label": "Angaben", "type": "checks", "options": DETAIL_OPTIONS,
                  "default": ["sunrise", "sunset", "wind", "humidity", "pressure", "clouds"]},
                 {"key": "columns", "label": "Spalten", "type": "number", "min": 1, "max": 4, "default": 2},
+                {"key": "indoor_temp_entity", "label": "Innen-Temperatur (Sensor)", "type": "entity", "domain": "sensor"},
+                {"key": "indoor_humidity_entity", "label": "Innen-Luftfeuchte (Sensor)", "type": "entity", "domain": "sensor"},
+                {"key": "air_quality_entity", "label": "Luftqualität (Sensor)", "type": "entity", "domain": "sensor"},
                 _title(), _style("none")]},
     {"type": "weather_forecast", "label": "Wettervorhersage", "icon": "mdi:calendar-week", "w": 412, "h": 190,
      "fields": [WEATHER_ENTITY,
                 {"key": "days", "label": "Tage", "type": "number", "min": 1, "max": 7, "default": 4},
+                {"key": "boxes", "label": "Tageskästen", "type": "select", "default": "outline",
+                 "options": [{"value": "outline", "label": "Umrandet"}, {"value": "card", "label": "Weiß gefüllt"},
+                             {"value": "none", "label": "Ohne"}]},
+                {"key": "gap", "label": "Abstand", "type": "number", "min": 0, "max": 40, "default": 12, "unit": "px"},
                 _title(), _style("none")]},
     {"type": "weather_chart", "label": "Temperatur\u00adverlauf", "icon": "mdi:chart-bell-curve-cumulative", "w": 756, "h": 96,
      "fields": [WEATHER_ENTITY,
                 {"key": "hours", "label": "Stunden", "type": "number", "min": 6, "max": 48, "default": 24},
+                {"key": "label_every", "label": "Uhrzeit alle … Stunden", "type": "number", "min": 1, "max": 12, "default": 2},
                 _title(), _style("none")]},
+    {"type": "status", "label": "Status (WLAN, Akku)", "icon": "mdi:wifi", "w": 230, "h": 20,
+     "fields": [{"key": "show_time", "label": "Aktualisierungszeit", "type": "bool", "default": True},
+                {"key": "show_wifi", "label": "WLAN-Signal", "type": "bool", "default": True},
+                {"key": "show_battery", "label": "Akku", "type": "bool", "default": True},
+                {"key": "align", "label": "Ausrichtung", "type": "select", "default": "right",
+                 "options": [{"value": "left", "label": "Links"}, {"value": "center", "label": "Mitte"},
+                             {"value": "right", "label": "Rechts"}]}]},
     {"type": "waste", "label": "Müllabfuhr", "icon": "mdi:trash-can-outline", "w": 320, "h": 214,
      "fields": [{"key": "entities", "label": "Müll-Sensoren", "type": "entity", "domain": "sensor", "multiple": True},
                 _title("Müllabfuhr"), _rows(36), STYLE_FIELD]},
@@ -169,6 +189,46 @@ def default_layout(weather: str | None = None, waste: list[str] | None = None,
             ws.append(widget("weather_chart", 22, 240, 756, 96, entity=weather))
             ws.append(widget("weather_forecast", 22, 346, 756, 122, entity=weather, days=7))
     return {"version": 2, "theme": {"mode": "light", "accent": "red"}, "widgets": ws}
+
+
+def station_layout(weather: str | None, title: str = "", indoor_temp: str | None = None,
+                   indoor_humidity: str | None = None, air_quality: str | None = None,
+                   available: list[str] | None = None) -> dict[str, Any]:
+    """Nachbau des bekannten esp32-weather-epd-Designs (800 × 480)."""
+    avail = available or ["sunrise", "sunset", "wind", "humidity", "pressure", "uv", "visibility", "clouds",
+                          "gusts", "dew_point"]
+    items = [k for k in ("sunrise", "sunset", "wind", "humidity", "pressure", "uv") if k in avail]
+    extra = []
+    if indoor_temp:
+        extra.append("indoor_temp")
+    if indoor_humidity:
+        extra.append("indoor_humidity")
+    if air_quality:
+        extra.append("air_quality")
+    for fill in ("visibility", "clouds", "gusts", "dew_point", "feels"):
+        if len(items) + len(extra) >= 8:
+            break
+        if fill in avail and fill not in items:
+            items.append(fill)
+    items = items[: max(0, 8 - len(extra))]
+    det = {"entity": weather, "items": items + extra, "columns": 2}
+    if indoor_temp:
+        det["indoor_temp_entity"] = indoor_temp
+    if indoor_humidity:
+        det["indoor_humidity_entity"] = indoor_humidity
+    if air_quality:
+        det["air_quality_entity"] = air_quality
+    return {"version": 2, "theme": {"mode": "light", "accent": "red"}, "widgets": [
+        widget("date", 150, 10, 500, 62, title=title or "Wetter", align="center"),
+        widget("status", 572, 6, 220, 20),
+        widget("weather_now", 22, 92, 368, 160, entity=weather),
+        widget("weather_details", 404, 82, 386, 176, **det),
+        widget("weather_chart", 8, 268, 784, 74, entity=weather, hours=24, label_every=2),
+        widget("weather_forecast", 10, 352, 780, 116, entity=weather, days=7, gap=12),
+    ]}
+
+
+TEMPLATES = {"station": "Wetterstation (esp32-weather-epd)", "default": "Standard"}
 
 
 def _num(v: Any, lo: int, hi: int, default: int) -> int:

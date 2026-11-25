@@ -21,7 +21,12 @@ echo "1/4  Dateien laden ..."
 mkdir -p "$DIR"
 curl -fsSL "$REPO/frame_receiver.py" -o "$DIR/frame_receiver.py"
 curl -fsSL "$REPO/frame_show.py"     -o "$DIR/frame_show.py"
+curl -fsSL "$REPO/frame_screens.py"  -o "$DIR/frame_screens.py"
 chmod +x "$DIR"/*.py
+
+echo "     Akku-Messung (I2C) und WLAN-Werkzeuge vorbereiten ..."
+sudo raspi-config nonint do_i2c 0 >/dev/null 2>&1 || true
+sudo apt-get install -y -qq python3-smbus i2c-tools wireless-tools fonts-dejavu-core >/dev/null 2>&1 || true
 
 echo "2/4  Alte stündliche Aufgabe entfernen (falls vorhanden) ..."
 if crontab -l 2>/dev/null | grep -q frame_dashboard.py; then

@@ -5,6 +5,10 @@ Zeigt ein frei gestaltbares Layout aus Home Assistant auf einem **Waveshare 7.3"
 - **Grafischer Layout-Editor** in der Seitenleiste („Bilderrahmen“): Elemente per Drag & Drop platzieren, Größe ziehen, Hilfslinien, Rückgängig, Live-Vorschau in den echten sechs Farben
 - **Elemente:** Datum/Titel, Wetter jetzt, Wetterdetails, Wettervorhersage, Temperaturverlauf, Müllabfuhr, Kalender, Einzelwert, Werteliste, To-do-Liste, Text, Linie
 - **Modernes Design:** Grau, Orange, Pastell und Verläufe werden aus den sechs Displayfarben gedithert (mit gemessener Spectra-6-Palette), Text und Icons bleiben gestochen scharf. Jost-Schrift, illustrierte Wettersymbole, Papier/Weiß/Dunkel, Akzentfarbe
+- **Vorlage „Wetterstation“**: Nachbau des esp32-weather-epd-Designs (Titel, Wetter, Detailraster, Temperaturverlauf, 7 Tage)
+- **Status vom Rahmen**: WLAN-Signal, Akku (INA219 des PhotoPainters), CPU-Temperatur als Sensoren und als Statuszeile im Bild
+- **Schutz & Hinweise**: Bei fast leerem Akku zeigt der Rahmen einen Hinweis und fährt sicher herunter; kommt lange kein Bild, zeigt er „Keine WLAN-Verbindung“ bzw. „Home Assistant nicht erreichbar“
+- **Innenklima & Luftqualität** aus beliebigen HA-Sensoren im Detailraster
 - Knopf **„Jetzt aktualisieren“**, Vorschaubild und Status direkt in Home Assistant
 - Der Rahmen wird nur neu gezeichnet, wenn sich etwas geändert hat
 
