@@ -42,7 +42,7 @@ from .const import (
     DOMAIN,
 )
 from .layout import default_layout, sanitize
-from .render import WD_SHORT, render_image, to_png
+from .render import WD_SHORT, render_image, simulate, to_png
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -180,7 +180,8 @@ class FrameManager:
         img = await self.hass.async_add_executor_job(
             render_image, lay, data, dt_util.now().date(), errors[0] if errors else None
         )
-        return await self.hass.async_add_executor_job(to_png, img, 0)
+        sim = await self.hass.async_add_executor_job(simulate, img)
+        return await self.hass.async_add_executor_job(to_png, sim, 0)
 
     # ------------------------------------------------------------ Lebenszyklus
     async def async_start(self) -> None:
@@ -226,10 +227,9 @@ class FrameManager:
                 img = await self.hass.async_add_executor_job(
                     render_image, self.layout, data, dt_util.now().date(), errors[0] if errors else None
                 )
-                preview = await self.hass.async_add_executor_job(to_png, img, 0)
-                png = preview if not self.rotation else await self.hass.async_add_executor_job(
-                    to_png, img, self.rotation
-                )
+                sim = await self.hass.async_add_executor_job(simulate, img)
+                preview = await self.hass.async_add_executor_job(to_png, sim, 0)
+                png = await self.hass.async_add_executor_job(to_png, img, self.rotation)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.exception("Bild konnte nicht erstellt werden")
                 self.status = f"Fehler beim Zeichnen: {err}"
@@ -285,12 +285,18 @@ class FrameManager:
         for wd in layout.get("widgets", []):
             t, p, wid = wd["type"], wd.get("props", {}), wd["id"]
             try:
-                if t in ("weather_now", "weather_forecast"):
+                if t in ("weather_now", "weather_forecast", "weather_details"):
                     ent = p.get("entity") or next(iter(self.hass.states.async_entity_ids("weather")), None)
                     if ent:
                         if ent not in weather_cache:
                             weather_cache[ent] = await self._weather(ent, today)
                         data[wid] = weather_cache[ent]
+                        if t == "weather_details":
+                            data[wid] = {"items": self._details(ent, p.get("items") or [])}
+                elif t == "weather_chart":
+                    ent = p.get("entity") or next(iter(self.hass.states.async_entity_ids("weather")), None)
+                    if ent:
+                        data[wid] = {"hourly": await self._hourly(ent, int(p.get("hours", 24)))}
                 elif t == "waste":
                     data[wid] = {"rows": self._waste(p.get("entities") or [], today)}
                 elif t == "calendar":
@@ -319,7 +325,8 @@ class FrameManager:
             raise ValueError(f"{entity_id} nicht gefunden")
         out: dict[str, Any] = {}
         if st.state not in ("unavailable", "unknown"):
-            out["now"] = {"cond": st.state, "temp": st.attributes.get("temperature")}
+            out["now"] = {"cond": st.state, "temp": st.attributes.get("temperature"),
+                          "feels": st.attributes.get("apparent_temperature")}
         try:
             resp = await self.hass.services.async_call(
                 "weather", "get_forecasts", {"entity_id": entity_id, "type": "daily"},
@@ -338,6 +345,64 @@ class FrameManager:
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Keine Tagesvorhersage für %s: %s", entity_id, err)
         return out
+
+    async def _hourly(self, entity_id: str, hours: int) -> list[dict[str, Any]]:
+        resp = await self.hass.services.async_call(
+            "weather", "get_forecasts", {"entity_id": entity_id, "type": "hourly"},
+            blocking=True, return_response=True,
+        )
+        out = []
+        now = dt_util.utcnow() - timedelta(minutes=59)
+        for f in (resp or {}).get(entity_id, {}).get("forecast", []):
+            dt_ = dt_util.parse_datetime(str(f.get("datetime")))
+            if dt_ is None or f.get("temperature") is None:
+                continue
+            if dt_.tzinfo and dt_ < now:
+                continue
+            rain = f.get("precipitation_probability")
+            if rain is None and f.get("precipitation") is not None:
+                rain = min(100, float(f["precipitation"]) * 25)
+            out.append({"temp": float(f["temperature"]), "rain": rain,
+                        "label": f"{dt_util.as_local(dt_) if dt_.tzinfo else dt_:%H}"})
+            if len(out) >= hours:
+                break
+        return out
+
+    def _details(self, entity_id: str, wanted: list[str]) -> list[dict[str, Any]]:
+        st = self.hass.states.get(entity_id)
+        a = st.attributes if st else {}
+        sun = self.hass.states.get("sun.sun")
+
+        def t(key):
+            v = sun.attributes.get(key) if sun else None
+            d = dt_util.parse_datetime(str(v)) if v else None
+            return f"{dt_util.as_local(d):%H:%M}" if d else "–"
+
+        def num(v, nd=0):
+            try:
+                return _fmt_number(round(float(v), nd))
+            except (TypeError, ValueError):
+                return "–"
+
+        catalog = {
+            "sunrise": ("mdi:weather-sunset-up", "Sonnenaufgang", lambda: (t("next_rising"), ""), "red"),
+            "sunset": ("mdi:weather-sunset-down", "Sonnenuntergang", lambda: (t("next_setting"), ""), "red"),
+            "wind": ("mdi:weather-windy", "Wind", lambda: (num(a.get("wind_speed")), a.get("wind_speed_unit", "km/h")), "blue"),
+            "humidity": ("mdi:water-percent", "Luftfeuchte", lambda: (num(a.get("humidity")), "%"), "blue"),
+            "pressure": ("mdi:gauge", "Luftdruck", lambda: (num(a.get("pressure")), a.get("pressure_unit", "hPa")), "fg"),
+            "clouds": ("mdi:weather-cloudy", "Bewölkung", lambda: (num(a.get("cloud_coverage")), "%"), "fg"),
+            "uv": ("mdi:white-balance-sunny", "UV-Index", lambda: (num(a.get("uv_index"), 1), ""), "red"),
+            "visibility": ("mdi:eye-outline", "Sichtweite", lambda: (num(a.get("visibility")), a.get("visibility_unit", "km")), "fg"),
+            "dew_point": ("mdi:water-thermometer-outline", "Taupunkt", lambda: (num(a.get("dew_point")), "°"), "blue"),
+            "feels": ("mdi:thermometer", "Gefühlt", lambda: (num(a.get("apparent_temperature")), "°"), "red"),
+        }
+        items = []
+        for k in wanted:
+            if k in catalog:
+                icon, label, fn, color = catalog[k]
+                v, u = fn()
+                items.append({"icon": icon, "label": label, "value": v, "unit": u, "color": color})
+        return items
 
     def _waste(self, entities: list[str], today: date) -> list[dict[str, Any]]:
         items = []

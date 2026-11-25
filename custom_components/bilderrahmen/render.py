@@ -1,39 +1,64 @@
-"""Zeichnet ein Layout aus Widgets für den 6-Farben-E-Paper-Rahmen (800x480).
+"""Zeichnet ein Widget-Layout für den 6-Farben-E-Paper-Rahmen (800x480).
 
-Reines Pillow ohne Home-Assistant-Abhängigkeiten. Eingabe:
-  layout = {"theme": {...}, "widgets": [{"id", "type", "x", "y", "w", "h", "props"}]}
-  data   = {widget_id: <vom Manager vorbereitete Daten>}
+Zwei Ebenen:
+  1. "paint": Hintergrund, Karten, Verläufe, Schatten und illustrierte
+     Wettersymbole in vollen Farben. Diese Ebene wird mit der gemessenen
+     Spectra-6-Palette gedithert – so entstehen Grau, Orange, Pastell und
+     weiche Übergänge aus feinen Farbpunkten.
+  2. "ink": Text, Icons und Linien in den reinen Displayfarben, ohne
+     Kantenglättung – gestochen scharf.
+
+Reines Pillow ohne Home-Assistant-Abhängigkeiten.
 """
 
 from __future__ import annotations
 
 import io
 import json
+import math
 import os
 from datetime import date
 from functools import lru_cache
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 W, H = 800, 480
-PALETTE = {
-    "black": (0, 0, 0),
-    "white": (255, 255, 255),
-    "red": (255, 0, 0),
-    "yellow": (255, 255, 0),
-    "green": (0, 255, 0),
-    "blue": (0, 0, 255),
+
+ORDER = ["black", "white", "yellow", "red", "blue", "green"]
+PURE = {
+    "black": (0, 0, 0), "white": (255, 255, 255), "yellow": (255, 255, 0),
+    "red": (255, 0, 0), "blue": (0, 0, 255), "green": (0, 255, 0),
+}
+# So erscheinen die Farben auf dem Spectra-6-Panel (für Dithering und Vorschau)
+SEEN = {
+    "black": (25, 30, 33), "white": (232, 232, 232), "yellow": (239, 222, 68),
+    "red": (178, 19, 24), "blue": (33, 87, 186), "green": (18, 95, 32),
 }
 ON = {"black": "white", "white": "black", "red": "white", "blue": "white",
-      "green": "black", "yellow": "black"}
+      "green": "white", "yellow": "black"}
+
+THEMES = {
+    "light": {"bg": (242, 242, 240), "card": (255, 255, 255), "line": "black", "fg": "black"},
+    "white": {"bg": (255, 255, 255), "card": (255, 255, 255), "line": "black", "fg": "black"},
+    "dark": {"bg": (44, 46, 52), "card": (66, 69, 76), "line": "white", "fg": "white"},
+}
+# Weiche Kartenfarben (oben, unten)
+TINTS = {
+    "sky": ((198, 222, 255), (232, 241, 255)),
+    "mint": ((204, 240, 214), (234, 249, 238)),
+    "sun": ((255, 233, 170), (255, 246, 216)),
+    "peach": ((255, 214, 186), (255, 236, 222)),
+    "rose": ((255, 206, 204), (255, 232, 230)),
+    "lilac": ((222, 212, 250), (240, 235, 253)),
+    "sand": ((238, 233, 222), (247, 244, 238)),
+}
 
 WD = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 WD_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
           "August", "September", "Oktober", "November", "Dezember"]
 MONTHS_SHORT = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
-
 COND = {
     "clear-night": "Klar", "cloudy": "Bewölkt", "exceptional": "Unwetter",
     "fog": "Nebel", "hail": "Hagel", "lightning": "Gewitter",
@@ -42,46 +67,24 @@ COND = {
     "snowy-rainy": "Schneeregen", "sunny": "Sonnig", "windy": "Windig",
     "windy-variant": "Windig",
 }
-# Wetter: (Icon, Farbe des runden Abzeichens)
-COND_ICON = {
-    "sunny": ("weather-sunny", "yellow"),
-    "clear-night": ("weather-night", "black"),
-    "partlycloudy": ("weather-partly-cloudy", "yellow"),
-    "cloudy": ("weather-cloudy", "black"),
-    "fog": ("weather-fog", "black"),
-    "rainy": ("weather-rainy", "blue"),
-    "pouring": ("weather-pouring", "blue"),
-    "snowy": ("weather-snowy", "blue"),
-    "snowy-rainy": ("weather-snowy-rainy", "blue"),
-    "hail": ("weather-hail", "blue"),
-    "lightning": ("weather-lightning", "red"),
-    "lightning-rainy": ("weather-lightning-rainy", "red"),
-    "windy": ("weather-windy", "green"),
-    "windy-variant": ("weather-windy-variant", "green"),
-    "exceptional": ("alert-circle-outline", "red"),
+BIN = {  # Tonne: (Kreis-Tönung, Icon-Farbe)
+    "black": ((70, 72, 78), "white"), "green": ((120, 200, 140), "black"),
+    "yellow": ((255, 222, 90), "black"), "blue": ((110, 150, 230), "white"), "red": ((240, 120, 110), "white"),
 }
 
 HERE = os.path.dirname(__file__)
 FONT_DIR = os.path.join(HERE, "fonts")
-FONT_FILES = {
-    "regular": "Inter-Regular.ttf",
-    "medium": "Inter-Medium.ttf",
-    "semibold": "Inter-SemiBold.ttf",
-    "bold": "Inter-Bold.ttf",
-    "display": "InterDisplay-Bold.ttf",
-    "display-semi": "InterDisplay-SemiBold.ttf",
-}
+WEIGHTS = {"light": 300, "regular": 400, "medium": 500, "semibold": 600, "bold": 700}
 
 
-@lru_cache(maxsize=128)
-def font(size: int, weight: str = "regular") -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(
-        os.path.join(FONT_DIR, FONT_FILES.get(weight, FONT_FILES["regular"])), max(6, int(size))
-    )
+@lru_cache(maxsize=200)
+def font(size: float, weight: str = "regular") -> ImageFont.FreeTypeFont:
+    w = WEIGHTS.get(weight, 400)
+    return ImageFont.truetype(os.path.join(FONT_DIR, f"Jost-{w}.ttf"), max(6, int(size)))
 
 
 @lru_cache(maxsize=64)
-def icon_font(size: int) -> ImageFont.FreeTypeFont:
+def icon_font(size: float) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(os.path.join(FONT_DIR, "materialdesignicons-webfont.ttf"), max(6, int(size)))
 
 
@@ -98,67 +101,6 @@ def icon_char(name: str | None) -> str | None:
     return chr(cp) if cp else None
 
 
-# ------------------------------------------------------------------ Zeichenhilfe
-class Ctx:
-    def __init__(self, img: Image.Image, theme: dict[str, Any]) -> None:
-        self.img = img
-        self.d = ImageDraw.Draw(img)
-        self.d.fontmode = "1"  # E-Paper: scharfe Kanten statt gedithertem Rand
-        dark = theme.get("mode") == "dark"
-        self.bg_name = "black" if dark else "white"
-        self.fg_name = "white" if dark else "black"
-        acc = theme.get("accent", "red")
-        self.accent_name = acc if acc in PALETTE and acc != self.bg_name else "red"
-
-    def name(self, n: str) -> str:
-        return {"fg": self.fg_name, "bg": self.bg_name, "accent": self.accent_name}.get(n, n)
-
-    def c(self, n: str) -> tuple[int, int, int]:
-        return PALETTE.get(self.name(n), PALETTE["black"])
-
-    def on(self, n: str) -> str:
-        return ON.get(self.name(n), "black")
-
-    def tw(self, txt: str, f) -> float:
-        return self.d.textlength(str(txt), font=f) if txt else 0
-
-    def fit(self, txt: Any, f, width: float) -> str:
-        txt = str(txt)
-        if self.tw(txt, f) <= width:
-            return txt
-        while txt and self.tw(txt + "…", f) > width:
-            txt = txt[:-1]
-        return (txt.rstrip() + "…") if txt else ""
-
-    def text(self, xy, txt, f, fill, anchor="la"):
-        self.d.text(xy, str(txt), font=f, fill=self.c(fill), anchor=anchor)
-
-    def tracked(self, x, y, txt, f, fill, tracking=1.5):
-        for ch in txt:
-            self.d.text((x, y), ch, font=f, fill=self.c(fill), anchor="ls")
-            x += self.tw(ch, f) + tracking
-        return x
-
-    def icon(self, cx, cy, name, size, fill):
-        ch = icon_char(name)
-        if ch:
-            self.d.text((cx, cy), ch, font=icon_font(size), fill=self.c(fill), anchor="mm")
-
-    def badge(self, cx, cy, dia, icon, color):
-        r = dia / 2
-        self.d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=self.c(color))
-        self.icon(cx, cy, icon, dia * 0.62, self.on(color))
-
-    def pill(self, x1, cy, txt, f, color, pad=10, h=None) -> float:
-        """Rechtsbündige Pille bis x1; liefert die linke Kante."""
-        h = h or int(f.size * 1.5)
-        w = self.tw(txt, f) + 2 * pad
-        x0 = x1 - w
-        self.d.rounded_rectangle([x0, cy - h / 2, x1, cy + h / 2], radius=h / 2, fill=self.c(color))
-        self.d.text(((x0 + x1) / 2, cy), txt, font=f, fill=self.c(self.on(color)), anchor="mm")
-        return x0
-
-
 def fmt_temp(t) -> str:
     try:
         return f"{round(float(t))}°"
@@ -166,37 +108,236 @@ def fmt_temp(t) -> str:
         return "–"
 
 
-# ------------------------------------------------------------------ Karte und Titel
-def _frame(ctx: Ctx, box, props):
-    """Zeichnet den Kartenstil; liefert Innenbereich, Textfarbe und Akzentfarbe."""
+def _lerp(a, b, t):
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+# ------------------------------------------------------------------ Zeichenkontext
+class Ctx:
+    """Jedes Widget wird zweimal aufgerufen: erst 'paint', dann 'ink'."""
+
+    def __init__(self, paint: Image.Image, theme: dict[str, Any]) -> None:
+        self.mode = "paint"
+        self.paint = paint
+        self.pd = ImageDraw.Draw(paint)
+        self.d: ImageDraw.ImageDraw | None = None
+        self.ink_img: Image.Image | None = None
+        self.theme_name = theme.get("mode") if theme.get("mode") in THEMES else "light"
+        self.t = THEMES[self.theme_name]
+        self.dark = self.theme_name == "dark"
+        self.fg = self.t["fg"]
+        acc = theme.get("accent", "red")
+        self.accent = acc if acc in PURE and acc != ("black" if self.dark else "white") else "red"
+        self._m = ImageDraw.Draw(Image.new("1", (1, 1)))
+
+    def start_ink(self, img: Image.Image) -> None:
+        self.mode = "ink"
+        self.ink_img = img
+        self.d = ImageDraw.Draw(img)
+        self.d.fontmode = "1"
+
+    def col(self, name: str) -> str:
+        return {"fg": self.fg, "accent": self.accent, "line": self.t["line"]}.get(name, name)
+
+    def tw(self, txt, f) -> float:
+        return self._m.textlength(str(txt), font=f) if txt else 0
+
+    def fit(self, txt, f, width: float) -> str:
+        txt = str(txt)
+        if self.tw(txt, f) <= width:
+            return txt
+        while txt and self.tw(txt + "…", f) > width:
+            txt = txt[:-1]
+        return (txt.rstrip() + "…") if txt else ""
+
+    # ---- Ebene 1 (weich)
+    def grad_shape(self, box, top, bottom, shape="rect", radius=0, mask=None) -> None:
+        """Füllt eine Form mit einem senkrechten Verlauf."""
+        if self.mode != "paint":
+            return
+        x, y, w, h = (int(round(v)) for v in box)
+        if w <= 0 or h <= 0:
+            return
+        if mask is None:
+            mask = Image.new("L", (w, h), 0)
+            md = ImageDraw.Draw(mask)
+            if shape == "ellipse":
+                md.ellipse([0, 0, w - 1, h - 1], fill=255)
+            else:
+                md.rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
+        g = Image.linear_gradient("L").resize((w, h))
+        fill = Image.composite(Image.new("RGB", (w, h), bottom), Image.new("RGB", (w, h), top), g)
+        self.paint.paste(fill, (x, y), mask)
+
+    def soft(self, box, color, radius=0, shape="rect") -> None:
+        if self.mode != "paint":
+            return
+        x, y, w, h = box
+        if shape == "ellipse":
+            self.pd.ellipse([x, y, x + w, y + h], fill=color)
+        else:
+            self.pd.rounded_rectangle([x, y, x + w, y + h], radius=radius, fill=color)
+
+    # ---- Ebene 2 (scharf)
+    def text(self, xy, txt, f, color, anchor="la") -> None:
+        if self.mode == "ink":
+            self.d.text(xy, str(txt), font=f, fill=PURE[self.col(color)], anchor=anchor)
+
+    def icon(self, cx, cy, name, size, color) -> None:
+        ch = icon_char(name)
+        if ch and self.mode == "ink":
+            self.d.text((cx, cy), ch, font=icon_font(size), fill=PURE[self.col(color)], anchor="mm")
+
+    def outline(self, box, radius=12, color="line", width=1) -> None:
+        if self.mode == "ink":
+            x, y, w, h = box
+            self.d.rounded_rectangle([x, y, x + w - 1, y + h - 1], radius=radius, outline=PURE[self.col(color)],
+                                     width=width)
+
+    def solid(self, box, color, radius=0, shape="rect") -> None:
+        if self.mode != "ink":
+            return
+        x, y, w, h = box
+        if shape == "ellipse":
+            self.d.ellipse([x, y, x + w, y + h], fill=PURE[self.col(color)])
+        else:
+            self.d.rounded_rectangle([x, y, x + w, y + h], radius=radius, fill=PURE[self.col(color)])
+
+    def line(self, pts, color, width=2) -> None:
+        if self.mode == "ink":
+            self.d.line(pts, fill=PURE[self.col(color)], width=width, joint="curve")
+
+    def pill(self, x1, cy, txt, f, color, pad=12, h=None) -> float:
+        h = h or int(f.size * 1.55)
+        w = self.tw(txt, f) + 2 * pad
+        x0 = x1 - w
+        if self.mode == "ink":
+            c = self.col(color)
+            self.d.rounded_rectangle([x0, cy - h / 2, x1, cy + h / 2], radius=h / 2, fill=PURE[c])
+            self.d.text(((x0 + x1) / 2, cy + 1), txt, font=f, fill=PURE[ON[c]], anchor="mm")
+        return x0
+
+
+# ------------------------------------------------------------------ illustrierte Wettersymbole
+SUN_T, SUN_B = (255, 196, 92), (246, 140, 62)
+CLOUD_T, CLOUD_B = (232, 232, 232), (178, 178, 178)
+DARK_T, DARK_B = (160, 160, 160), (105, 105, 105)
+
+
+def _cloud(ctx: Ctx, cx, cy, s, dark=False) -> None:
+    """Wolke mit Breite ≈ 2s, Mittelpunkt (cx, cy)."""
+    if ctx.mode != "paint":
+        return
+    w, h = int(2.1 * s), int(1.35 * s)
+    m = Image.new("L", (w, h), 0)
+    md = ImageDraw.Draw(m)
+    for px, py, r in ((0.32, 0.66, 0.3), (0.55, 0.45, 0.42), (0.8, 0.68, 0.26)):
+        md.ellipse([(px * w - r * w), (py * h - r * w), (px * w + r * w), (py * h + r * w)], fill=255)
+    md.rounded_rectangle([0.06 * w, 0.62 * h, 0.94 * w, 0.98 * h], radius=0.18 * h, fill=255)
+    t, b = (DARK_T, DARK_B) if dark else (CLOUD_T, CLOUD_B)
+    ctx.grad_shape((cx - w / 2, cy - h / 2, w, h), t, b, mask=m)
+
+
+def _sun(ctx: Ctx, cx, cy, r) -> None:
+    ctx.grad_shape((cx - r, cy - r, 2 * r, 2 * r), SUN_T, SUN_B, shape="ellipse")
+
+
+def _moon(ctx: Ctx, cx, cy, r) -> None:
+    if ctx.mode != "paint":
+        return
+    size = int(2 * r)
+    m = Image.new("L", (size, size), 0)
+    md = ImageDraw.Draw(m)
+    md.ellipse([0, 0, size - 1, size - 1], fill=255)
+    md.ellipse([size * 0.32, -size * 0.18, size * 1.25, size * 0.75], fill=0)
+    ctx.grad_shape((cx - r, cy - r, size, size), (255, 236, 160), (240, 200, 100), mask=m)
+
+
+def wx_icon(ctx: Ctx, cx, cy, size, cond) -> None:
+    """Illustriertes Wettersymbol, ungefähr size × size."""
+    s = size / 2
+    c = cond or "cloudy"
+    if c == "sunny":
+        _sun(ctx, cx, cy, s * 0.72)
+    elif c == "clear-night":
+        _moon(ctx, cx, cy, s * 0.7)
+    elif c == "partlycloudy":
+        _sun(ctx, cx + s * 0.28, cy - s * 0.22, s * 0.52)
+        _cloud(ctx, cx - s * 0.08, cy + s * 0.18, s * 0.72)
+    elif c in ("cloudy", "fog", "windy", "windy-variant"):
+        _cloud(ctx, cx + s * 0.22, cy - s * 0.2, s * 0.55, dark=True)
+        _cloud(ctx, cx - s * 0.05, cy + s * 0.12, s * 0.78)
+        if c == "fog" and ctx.mode == "paint":
+            for i in range(3):
+                yy = cy + s * (0.5 + i * 0.17)
+                ctx.soft((cx - s * 0.8, yy, s * 1.6, s * 0.08), (150, 156, 170), radius=4)
+        if c.startswith("windy"):
+            for i, ln in enumerate((0.9, 0.6)):
+                yy = cy + s * (0.62 + i * 0.2)
+                ctx.line([cx - s * 0.7, yy, cx - s * 0.7 + s * 1.4 * ln, yy], "blue", max(2, int(s * 0.06)))
+    else:
+        dark = c in ("pouring", "lightning", "lightning-rainy", "hail", "exceptional")
+        _cloud(ctx, cx, cy - s * 0.18, s * 0.8, dark=dark)
+        base = cy + s * 0.42
+        lw = max(2, int(s * 0.07))
+        if c in ("rainy", "pouring", "lightning-rainy", "snowy-rainy"):
+            n = 4 if c == "pouring" else 3
+            for i in range(n):
+                xx = cx - s * 0.42 + i * (s * 0.84 / (n - 1))
+                ctx.line([xx + s * 0.06, base, xx - s * 0.06, base + s * 0.32], "blue", lw)
+        if c in ("snowy", "snowy-rainy", "hail"):
+            for i in range(3 if c != "snowy-rainy" else 2):
+                xx = cx - s * 0.35 + i * s * 0.35 + (s * 0.17 if c == "snowy-rainy" else 0)
+                ctx.icon(xx, base + s * 0.2, "snowflake" if c != "hail" else "circle", s * 0.3, "blue")
+        if c in ("lightning", "lightning-rainy", "exceptional"):
+            pts = [(cx + s * 0.08, base - s * 0.22), (cx - s * 0.2, base + s * 0.22), (cx, base + s * 0.22),
+                   (cx - s * 0.12, base + s * 0.55), (cx + s * 0.25, base + s * 0.05), (cx + s * 0.04, base + s * 0.05)]
+            if ctx.mode == "paint":
+                ctx.pd.polygon(pts, fill=(255, 214, 40))
+            else:
+                ctx.d.polygon(pts, outline=PURE["black"])
+
+
+# ------------------------------------------------------------------ Karten
+def _card(ctx: Ctx, box, props, default="card"):
+    """Zeichnet die Karte; liefert Innenbereich und Textfarbe."""
     x, y, w, h = box
-    style = props.get("style", "plain")
-    r = int(props.get("radius", 20))
-    if style == "outline":
-        ctx.d.rounded_rectangle([x, y, x + w - 1, y + h - 1], radius=r, outline=ctx.c("fg"), width=3)
-        return (x + 18, y + 14, w - 36, h - 28), "fg", "accent"
-    if style in ("filled", "accent"):
-        col = ctx.name("fg" if style == "filled" else "accent")
-        ctx.d.rounded_rectangle([x, y, x + w - 1, y + h - 1], radius=r, fill=PALETTE[col])
-        on = ON[col]
-        acc = ctx.accent_name if style == "filled" and ctx.accent_name not in (col, ctx.fg_name) else on
-        return (x + 18, y + 14, w - 36, h - 28), on, acc
-    return (x, y, w, h), "fg", "accent"
+    style = props.get("style") or default
+    r = int(props.get("radius", 14))
+    pad = int(props.get("padding", 16))
+    if style == "none" or style == "plain":
+        return (x, y, w, h), "fg"
+    if style == "accent":
+        ctx.solid((x, y, w - 1, h - 1), "accent", radius=r)
+        return (x + pad, y + pad - 2, w - 2 * pad, h - 2 * pad + 4), ON[ctx.accent]
+    if style == "dark":
+        ctx.grad_shape(box, (62, 66, 74), (40, 43, 49), radius=r)
+        return (x + pad, y + pad - 2, w - 2 * pad, h - 2 * pad + 4), "white"
+    if style in TINTS:
+        top, bottom = TINTS[style]
+        ctx.grad_shape(box, top, bottom, radius=r)
+        if not ctx.dark:
+            ctx.outline(box, radius=r)
+        return (x + pad, y + pad - 2, w - 2 * pad, h - 2 * pad + 4), "black"
+    # "card": helle Karte mit feiner Linie
+    ctx.soft(box, ctx.t["card"], radius=r)
+    ctx.outline(box, radius=r)
+    return (x + pad, y + pad - 2, w - 2 * pad, h - 2 * pad + 4), "fg"
 
 
-def _title(ctx: Ctx, inner, props, fg, acc, default_icon=None):
+def _title(ctx: Ctx, inner, props, fg, default_icon=None):
     title = str(props.get("title") or "").strip()
     if not title:
         return inner
     x, y, w, h = inner
-    f = font(16, "bold")
-    ic = props.get("icon") or default_icon
+    f = font(19, "medium")
+    ic = props.get("icon") if props.get("icon") and icon_char(props.get("icon")) else default_icon
     tx = x
-    if ic and icon_char(ic):
-        ctx.icon(x + 11, y + 10, ic, 22, acc)
+    if ic:
+        ctx.icon(x + 11, y + 12, ic, 22, "accent" if fg == ctx.fg and not ctx.dark else fg)
         tx = x + 30
-    ctx.tracked(tx, y + 16, ctx.fit(title.upper(), f, w - (tx - x)), f, fg, tracking=1.4)
-    return (x, y + 32, w, h - 32)
+    ctx.text((tx, y + 20), ctx.fit(title, f, w - (tx - x)), f, fg, anchor="ls")
+    return (x, y + 34, w, h - 34)
 
 
 def _rows(ctx, inner, rows, row_h, draw_row, fg):
@@ -207,137 +348,219 @@ def _rows(ctx, inner, rows, row_h, draw_row, fg):
         draw_row(r, y + i * row_h, row_h)
     rest = len(rows) - len(shown)
     if rest > 0:
-        ctx.text((x, y + len(shown) * row_h + row_h / 2), f"+ {rest} weitere", font(15, "semibold"), fg, anchor="lm")
+        ctx.text((x, y + len(shown) * row_h + row_h / 2), f"+ {rest} weitere", font(15, "medium"), fg, anchor="lm")
 
 
 def _empty(ctx, inner, txt, fg):
     x, y, w, h = inner
-    ctx.text((x, y + 4), ctx.fit(txt, font(17, "medium"), w), font(17, "medium"), fg)
+    ctx.text((x, y + 2), ctx.fit(txt, font(17, "regular"), w), font(17, "regular"), fg)
 
 
 # ------------------------------------------------------------------ Widgets
 def w_date(ctx: Ctx, box, props, data, today: date):
-    (x, y, w, h), fg, acc = _frame(ctx, box, props)
-    top = WD[today.weekday()]
-    bottom = f"{today.day}. {MONTHS[today.month - 1]}"
+    (x, y, w, h), fg = _card(ctx, box, props, "none")
+    title = str(props.get("title") or "").strip()
+    date_s = f"{WD[today.weekday()]}, {today.day}. {MONTHS[today.month - 1]}"
     if props.get("show_year"):
-        bottom += f" {today.year}"
-    s1 = max(12, int(h * 0.27))
-    s2 = max(16, int(h * 0.58))
-    while ctx.tw(bottom, font(s2, "display")) > w and s2 > 16:
-        s2 -= 2
-    ctx.text((x, y + s1 * 0.95), ctx.fit(top.upper(), font(s1, "bold"), w), font(s1, "bold"), acc, anchor="ls")
-    ctx.text((x - 2, y + h), bottom, font(s2, "display"), fg, anchor="ld")
+        date_s += f" {today.year}"
+    align = props.get("align") if props.get("align") in ("left", "center", "right") else "left"
+    ax = {"left": x, "center": x + w / 2, "right": x + w}[align]
+    a1 = {"left": "ls", "center": "ms", "right": "rs"}[align]
+    if title:
+        s1 = int(h * 0.52)
+        while s1 > 14 and ctx.tw(title, font(s1, "medium")) > w:
+            s1 -= 2
+        s2 = max(12, int(h * 0.27))
+        ctx.text((ax, y + s1 * 0.95), title, font(s1, "medium"), fg, anchor=a1)
+        ctx.text((ax, y + h - 2), ctx.fit(date_s, font(s2, "regular"), w), font(s2, "regular"), fg,
+                 anchor={"left": "ld", "center": "md", "right": "rd"}[align])
+    else:
+        top = WD[today.weekday()]
+        bottom = f"{today.day}. {MONTHS[today.month - 1]}" + (f" {today.year}" if props.get("show_year") else "")
+        s1 = max(12, int(h * 0.26))
+        s2 = max(16, int(h * 0.64))
+        while ctx.tw(bottom, font(s2, "medium")) > w and s2 > 16:
+            s2 -= 2
+        ctx.text((ax, y + s1 * 0.95), top, font(s1, "regular"), "accent" if fg == ctx.fg else fg, anchor=a1)
+        ctx.text((ax - (s2 * 0.04 if align == "left" else 0), y + h - s2 * 0.08), bottom, font(s2, "medium"), fg,
+                 anchor=a1)
 
 
 def w_weather_now(ctx: Ctx, box, props, data, today):
-    inner, fg, acc = _frame(ctx, box, props)
-    inner = _title(ctx, inner, props, fg, acc)
+    inner, fg = _card(ctx, box, props, "none")
+    inner = _title(ctx, inner, props, fg)
     x, y, w, h = inner
     now = (data or {}).get("now")
     if not now:
         _empty(ctx, inner, "Wetter nicht verfügbar", fg)
         return
-    cond = now.get("cond")
-    ic, col = COND_ICON.get(cond, ("weather-cloudy", "black"))
-    if col in (ctx.bg_name,) or (fg != "fg" and col == ctx.name("fg")):
-        col = acc
-    dia = int(min(h, w * 0.4))
-    ctx.badge(x + dia / 2, y + h / 2, dia, ic, col)
-    tx = x + dia + max(16, int(w * 0.05))
+    isz = min(h * 0.95, w * 0.42)
+    wx_icon(ctx, x + isz / 2, y + h / 2, isz, now.get("cond"))
+    tx = x + isz + max(14, w * 0.05)
     avail = x + w - tx
-    t = fmt_temp(now.get("temp"))
-    size = int(h * 0.6)
-    while size > 20 and ctx.tw(t, font(size, "display")) > avail:
+    t = fmt_temp(now.get("temp")).rstrip("°")
+    size = int(h * 0.62)
+    unit_f = font(max(14, size * 0.3), "regular")
+    while size > 20 and ctx.tw(t, font(size, "light")) + ctx.tw("°C", unit_f) > avail:
         size -= 2
-    small = max(13, int(h * 0.13))
-    cap = size * 0.73
-    block = cap + 12 + small * 2.5
+        unit_f = font(max(14, size * 0.3), "regular")
+    small = max(14, int(h * 0.13))
+    cap = size * 0.7
+    block = cap + 12 + small * (2.6 if (data or {}).get("today") else 1.2)
     base = y + (h - block) / 2 + cap
-    ctx.text((tx - size * 0.04, base), t, font(size, "display"), fg, anchor="ls")
+    tf = font(size, "light")
+    ctx.text((tx - size * 0.03, base), t, tf, fg, anchor="ls")
+    ctx.text((tx + ctx.tw(t, tf) + 2, base - cap + unit_f.size * 0.8), "°C", unit_f, fg, anchor="ls")
     line = base + 12 + small
-    ctx.text((tx, line), ctx.fit(COND.get(cond, cond or ""), font(small, "bold"), avail),
-             font(small, "bold"), fg, anchor="ls")
+    sub = COND.get(now.get("cond"), now.get("cond") or "")
+    if now.get("feels") is not None:
+        sub += f" · gefühlt {fmt_temp(now['feels'])}"
+    ctx.text((tx, line), ctx.fit(sub, font(small, "regular"), avail), font(small, "regular"), fg, anchor="ls")
     td = (data or {}).get("today")
     if td:
         line += small * 1.5
-        fx = font(small, "medium")
-        cx = tx
-        for arrow, val in (("arrow-down-thin", td.get("lo")), ("arrow-up-thin", td.get("hi"))):
-            ctx.icon(cx + small * 0.45, line - small * 0.36, arrow, small * 1.25, acc)
-            cx += small * 1.0
-            s = fmt_temp(val)
-            ctx.text((cx, line), s, fx, fg, anchor="ls")
-            cx += ctx.tw(s, fx) + small * 0.9
+        s = f"{fmt_temp(td.get('hi'))} / {fmt_temp(td.get('lo'))}"
+        ctx.text((tx, line), s, font(small, "medium"), fg, anchor="ls")
+
+
+def w_weather_details(ctx: Ctx, box, props, data, today):
+    inner, fg = _card(ctx, box, props, "none")
+    inner = _title(ctx, inner, props, fg)
+    x, y, w, h = inner
+    items = (data or {}).get("items") or []
+    if not items:
+        _empty(ctx, inner, "Keine Details", fg)
+        return
+    cols = max(1, int(props.get("columns", 2)))
+    rows = math.ceil(len(items) / cols)
+    cw, rh = w / cols, h / rows
+    isz = min(rh * 0.62, 34)
+    for i, it in enumerate(items):
+        cx0 = x + (i % cols) * cw
+        cy = y + (i // cols) * rh + rh / 2
+        ctx.icon(cx0 + isz / 2, cy, it.get("icon"), isz, it.get("color", "fg") if fg == ctx.fg else fg)
+        tx = cx0 + isz + 12
+        lf = font(max(11, rh * 0.25), "regular")
+        vf = font(max(13, rh * 0.36), "medium")
+        uf = font(max(10, rh * 0.22), "regular")
+        ctx.text((tx, cy - 2), ctx.fit(it.get("label", ""), lf, cw - isz - 16), lf, fg, anchor="ls")
+        v = str(it.get("value", "–"))
+        ctx.text((tx, cy + 1), v, vf, fg, anchor="lt")
+        if it.get("unit"):
+            ctx.text((tx + ctx.tw(v, vf) + 3, cy + 1 + vf.size * 0.36), it["unit"], uf, fg, anchor="lt")
 
 
 def w_weather_forecast(ctx: Ctx, box, props, data, today):
-    inner, fg, acc = _frame(ctx, box, props)
-    inner = _title(ctx, inner, props, fg, acc)
+    inner, fg = _card(ctx, box, props, "none")
+    inner = _title(ctx, inner, props, fg)
     x, y, w, h = inner
-    days = ((data or {}).get("forecast") or [])[: max(1, min(int(props.get("days", 3)), 7))]
+    days = ((data or {}).get("forecast") or [])[: max(1, min(int(props.get("days", 5)), 7))]
     if not days:
         _empty(ctx, inner, "Keine Vorhersage", fg)
         return
     n = len(days)
-    cw = w / n
-    lbl = max(12, int(h * 0.15))
-    tsz = max(12, int(h * 0.15))
-    dia = int(max(16, min(cw * 0.6, h - lbl * 1.5 - tsz * 1.5 - 16)))
+    gap = int(props.get("gap", 10))
+    cw = (w - gap * (n - 1)) / n
+    lbl = max(13, min(22, h * 0.15))
+    tsz = max(12, min(19, h * 0.12))
     for i, f in enumerate(days):
-        cx = x + cw * i + cw / 2
-        ctx.text((cx, y + lbl * 0.95), WD_SHORT[f["date"].weekday()].upper(), font(lbl, "bold"), fg, anchor="ms")
-        ic, col = COND_ICON.get(f.get("cond"), ("weather-cloudy", "black"))
-        if col == ctx.bg_name or (fg != "fg" and col == ctx.name("fg")):
-            col = acc
-        top = y + lbl * 1.3 + 4
-        bottom = y + h - tsz * 1.4
-        ctx.badge(cx, (top + bottom) / 2, dia, ic, col)
-        hi, lo = fmt_temp(f.get("hi")), fmt_temp(f.get("lo"))
-        fb, fr = font(tsz, "bold"), font(tsz, "regular")
-        total = ctx.tw(hi, fb) + 7 + ctx.tw(lo, fr)
-        sx = cx - total / 2
-        ctx.text((sx, y + h), hi, fb, fg, anchor="ld")
-        ctx.text((sx + ctx.tw(hi, fb) + 7, y + h), lo, fr, fg, anchor="ld")
+        bx = (int(x + i * (cw + gap)), int(y), int(cw), int(h))
+        ctx.soft(bx, ctx.t["card"], radius=10)
+        ctx.outline(bx, radius=10)
+        cx = bx[0] + cw / 2
+        ctx.text((cx, y + 8 + lbl), WD_SHORT[f["date"].weekday()], font(lbl, "medium"), "fg", anchor="ms")
+        top = y + lbl + 16
+        bottom = y + h - tsz - 14
+        isz = max(16, min(cw * 0.78, bottom - top))
+        wx_icon(ctx, cx, (top + bottom) / 2, isz, f.get("cond"))
+        s = f"{fmt_temp(f.get('hi'))} / {fmt_temp(f.get('lo'))}"
+        ctx.text((cx, y + h - 9), ctx.fit(s, font(tsz, "regular"), cw - 6), font(tsz, "regular"), "fg", anchor="md")
+
+
+def w_weather_chart(ctx: Ctx, box, props, data, today):
+    inner, fg = _card(ctx, box, props, "none")
+    inner = _title(ctx, inner, props, fg)
+    x, y, w, h = inner
+    pts = ((data or {}).get("hourly") or [])[: int(props.get("hours", 24))]
+    if len(pts) < 2:
+        _empty(ctx, inner, "Keine stündliche Vorhersage", fg)
+        return
+    lf = font(13, "regular")
+    left, right, bottom = 30, 34, 20
+    gx, gy, gw, gh = x + left, y + 4, w - left - right, h - bottom - 6
+    temps = [p.get("temp") for p in pts if p.get("temp") is not None]
+    tmin, tmax = min(temps), max(temps)
+    if tmax - tmin < 4:
+        mid = (tmax + tmin) / 2
+        tmin, tmax = mid - 2, mid + 2
+    n = len(pts)
+    X = [gx + i * gw / (n - 1) for i in range(n)]
+    Y = [gy + gh - ((p.get("temp", tmin) - tmin) / (tmax - tmin)) * gh * 0.82 - gh * 0.09 for p in pts]
+    # Regenwahrscheinlichkeit als weiche Balken
+    bw = max(2, gw / n * 0.55)
+    for i, p in enumerate(pts):
+        pr = p.get("rain")
+        if pr:
+            bh = gh * min(1, pr / 100)
+            ctx.soft((X[i] - bw / 2, gy + gh - bh, bw, bh), (150, 182, 240))
+    # Fläche unter der Kurve
+    if ctx.mode == "paint":
+        poly = list(zip(X, Y, strict=True)) + [(X[-1], gy + gh), (X[0], gy + gh)]
+        m = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(m).polygon(poly, fill=255)
+        g = Image.linear_gradient("L").resize((W, int(gh) + 2))
+        fill = Image.new("RGB", (W, H), (255, 226, 196))
+        lower = Image.new("RGB", (W, H), _lerp((255, 255, 255), ctx.t["bg"], 0.5))
+        gm = Image.new("L", (W, H), 0)
+        gm.paste(g, (0, int(gy)))
+        ctx.paint.paste(Image.composite(lower, fill, gm), (0, 0), m)
+    ctx.line(list(zip(X, Y, strict=True)), "red", 3)
+    ctx.line([gx, gy + gh, gx + gw, gy + gh], "fg", 1)
+    # Beschriftung
+    ctx.text((x, gy + 6), fmt_temp(tmax), lf, fg, anchor="lm")
+    ctx.text((x, gy + gh - 4), fmt_temp(tmin), lf, fg, anchor="lm")
+    ctx.text((x + w, gy + 6), "100%", lf, fg, anchor="rm")
+    ctx.text((x + w, gy + gh - 4), "0%", lf, fg, anchor="rm")
+    step = max(1, round(n / 8))
+    for i in range(0, n, step):
+        ctx.text((X[i], y + h), pts[i].get("label", ""), lf, fg, anchor="md")
 
 
 def w_waste(ctx: Ctx, box, props, data, today):
-    inner, fg, acc = _frame(ctx, box, props)
-    inner = _title(ctx, inner, props, fg, acc, "trash-can-outline")
+    inner, fg = _card(ctx, box, props, "card")
+    inner = _title(ctx, inner, props, fg, "trash-can-outline")
     x, y, w, h = inner
     rows = (data or {}).get("rows") or []
     if not rows:
         _empty(ctx, inner, props.get("empty") or "Keine Termine", fg)
         return
-    row_h = int(props.get("row_height", 40))
-    fs = max(13, int(row_h * 0.45))
+    row_h = int(props.get("row_height", 36))
+    fs = max(14, int(row_h * 0.5))
 
     def draw(r, ry, rh):
         cy = ry + rh / 2
-        dia = rh * 0.74
-        col = r.get("color", "black")
-        if col == ctx.bg_name:
-            col = ctx.fg_name
-        ring = col in ("yellow", "white", "green") and ctx.bg_name == "white"
-        ctx.d.ellipse([x, cy - dia / 2, x + dia, cy + dia / 2], fill=PALETTE[col],
-                      outline=ctx.c("fg") if ring else None, width=2)
-        ctx.icon(x + dia / 2, cy, r.get("icon") or "trash-can", dia * 0.58, ON[col])
+        dia = rh * 0.78
+        bc = r.get("color", "black")
+        bc = bc if bc in PURE else "black"
+        if bc == "white" or (bc == "black" and ctx.dark):
+            bc = "fg"
+        ctx.solid((x, cy - dia / 2, dia, dia), bc, shape="ellipse")
+        ctx.icon(x + dia / 2, cy, r.get("icon") or "trash-can", dia * 0.56, ON[ctx.col(bc)])
         tx = x + dia + 12
         if r.get("soon"):
-            x0 = ctx.pill(x + w, cy, r["when"], font(fs - 1, "bold"), acc, pad=12, h=int(rh * 0.68))
+            x0 = ctx.pill(x + w, cy, r["when"], font(fs - 1, "medium"), "accent", pad=12, h=int(rh * 0.7))
         else:
-            fr = font(fs, "medium")
+            fr = font(fs, "regular")
             x0 = x + w - ctx.tw(r["when"], fr)
-            ctx.text((x + w, cy), r["when"], fr, fg, anchor="rm")
-        ctx.text((tx, cy), ctx.fit(r["name"], font(fs, "semibold"), x0 - tx - 10),
-                 font(fs, "semibold"), fg, anchor="lm")
+            ctx.text((x + w, cy + 1), r["when"], fr, fg, anchor="rm")
+        ctx.text((tx, cy + 1), ctx.fit(r["name"], font(fs, "medium"), x0 - tx - 10), font(fs, "medium"), fg, anchor="lm")
 
     _rows(ctx, inner, rows, row_h, draw, fg)
 
 
 def w_calendar(ctx: Ctx, box, props, data, today):
-    inner, fg, acc = _frame(ctx, box, props)
-    inner = _title(ctx, inner, props, fg, acc, "calendar-blank-outline")
+    inner, fg = _card(ctx, box, props, "card")
+    inner = _title(ctx, inner, props, fg, "calendar-blank-outline")
     x, y, w, h = inner
     rows = (data or {}).get("rows") or []
     if not rows:
@@ -345,115 +568,117 @@ def w_calendar(ctx: Ctx, box, props, data, today):
         return
     row_h = int(props.get("row_height", 50))
     tile = int(row_h * 0.84)
-    fs = max(13, int(row_h * 0.35))
+    fs = max(14, int(row_h * 0.36))
 
     def draw(r, ry, rh):
         d: date = r["date"]
         delta = (d - today).days
         ty = ry + (rh - tile) / 2
         if delta <= 1:
-            ctx.d.rounded_rectangle([x, ty, x + tile, ty + tile], radius=12, fill=ctx.c(acc))
-            tc = ctx.on(acc)
+            ctx.solid((x, ty, tile, tile), "accent", radius=10)
+            tc = ON[ctx.accent]
         else:
-            ctx.d.rounded_rectangle([x, ty, x + tile, ty + tile], radius=12, outline=ctx.c(fg), width=2)
-            tc = fg
-        ctx.text((x + tile / 2, ty + tile * 0.55), str(d.day), font(int(tile * 0.46), "display"), tc, anchor="ms")
-        ctx.text((x + tile / 2, ty + tile * 0.84), MONTHS_SHORT[d.month - 1].upper(),
-                 font(max(9, int(tile * 0.19)), "bold"), tc, anchor="ms")
+            ctx.outline((x, ty, tile, tile), radius=10, color="fg", width=2)
+            tc = "fg"
+        ctx.text((x + tile / 2, ty + tile * 0.56), str(d.day), font(tile * 0.48, "medium"), tc, anchor="ms")
+        ctx.text((x + tile / 2, ty + tile * 0.86), MONTHS_SHORT[d.month - 1], font(max(10, tile * 0.22), "regular"),
+                 tc, anchor="ms")
         tx = x + tile + 14
         cy = ry + rh / 2
         sub = "Heute" if delta == 0 else "Morgen" if delta == 1 else WD[d.weekday()]
         if r.get("time"):
-            sub += f" · {r['time']}"
-        ctx.text((tx, cy - 2), ctx.fit(r.get("text", ""), font(fs, "semibold"), x + w - tx),
-                 font(fs, "semibold"), fg, anchor="ls")
-        ctx.text((tx, cy + 4), ctx.fit(sub, font(max(11, fs - 4), "medium"), x + w - tx),
-                 font(max(11, fs - 4), "medium"), fg, anchor="lt")
+            sub += f", {r['time']} Uhr"
+        ctx.text((tx, cy + 1), ctx.fit(r.get("text", ""), font(fs, "medium"), x + w - tx), font(fs, "medium"), fg,
+                 anchor="ls")
+        ctx.text((tx, cy + 4), ctx.fit(sub, font(max(11, fs - 3), "regular"), x + w - tx),
+                 font(max(11, fs - 3), "regular"), fg, anchor="lt")
 
     _rows(ctx, inner, rows, row_h, draw, fg)
 
 
 def w_entity(ctx: Ctx, box, props, data, today):
-    inner, fg, acc = _frame(ctx, box, props)
+    inner, fg = _card(ctx, box, props, "card")
     x, y, w, h = inner
     if not data:
         _empty(ctx, inner, "Entität wählen", fg)
         return
     isz = int(min(h * 0.3, 40))
-    ctx.icon(x + isz / 2, y + isz / 2, props.get("icon") or data.get("icon"), isz, acc)
+    ctx.icon(x + isz / 2, y + isz / 2, props.get("icon") or data.get("icon"), isz,
+             "accent" if fg == ctx.fg and not ctx.dark else fg)
     label = props.get("title") or data.get("name", "")
-    lf = font(max(12, int(h * 0.12)), "semibold")
+    lf = font(max(13, int(h * 0.13)), "regular")
     ctx.text((x, y + h), ctx.fit(label, lf, w), lf, fg, anchor="ld")
     val, unit = str(data.get("value", "–")), str(data.get("unit") or "")
-    base = y + h - lf.size * 2.0
-    size = int(h * 0.44)
+    base = y + h - lf.size * 1.8
+    size = int(h * 0.46)
     while size > 14:
-        uf = font(max(11, int(size * 0.36)), "semibold")
-        if ctx.tw(val, font(size, "display")) + (ctx.tw(unit, uf) + 6 if unit else 0) <= w:
+        uf = font(max(11, int(size * 0.34)), "regular")
+        if ctx.tw(val, font(size, "light")) + (ctx.tw(unit, uf) + 6 if unit else 0) <= w:
             break
         size -= 2
-    vf = font(size, "display")
-    uf = font(max(11, int(size * 0.36)), "semibold")
+    vf = font(size, "light")
+    uf = font(max(11, int(size * 0.34)), "regular")
     ctx.text((x - size * 0.03, base), val, vf, fg, anchor="ls")
     if unit:
-        ctx.text((x + ctx.tw(val, vf) + 6, base), unit, uf, fg, anchor="ls")
+        ctx.text((x + ctx.tw(val, vf) + 5, base), unit, uf, fg, anchor="ls")
 
 
 def w_entities(ctx: Ctx, box, props, data, today):
-    inner, fg, acc = _frame(ctx, box, props)
-    inner = _title(ctx, inner, props, fg, acc, "view-list-outline")
+    inner, fg = _card(ctx, box, props, "card")
+    inner = _title(ctx, inner, props, fg, "view-list-outline")
     x, y, w, h = inner
     rows = (data or {}).get("rows") or []
     if not rows:
         _empty(ctx, inner, "Entitäten wählen", fg)
         return
     row_h = int(props.get("row_height", 40))
-    fs = max(13, int(row_h * 0.44))
+    fs = max(14, int(row_h * 0.44))
 
     def draw(r, ry, rh):
         cy = ry + rh / 2
-        isz = int(rh * 0.6)
-        ctx.icon(x + isz / 2, cy, r.get("icon"), isz, acc)
-        tx = x + isz + 10
+        isz = rh * 0.62
+        ctx.icon(x + isz / 2, cy, r.get("icon"), isz, "accent" if fg == ctx.fg and not ctx.dark else fg)
+        tx = x + isz + 12
         v = str(r.get("value", "–")) + (f" {r['unit']}" if r.get("unit") else "")
-        fv = font(fs, "bold")
-        ctx.text((x + w, cy), v, fv, fg, anchor="rm")
+        fv = font(fs, "medium")
+        ctx.text((x + w, cy + 1), v, fv, fg, anchor="rm")
         avail = x + w - tx - ctx.tw(v, fv) - 12
-        ctx.text((tx, cy), ctx.fit(r.get("name", ""), font(fs, "medium"), avail), font(fs, "medium"), fg, anchor="lm")
+        ctx.text((tx, cy + 1), ctx.fit(r.get("name", ""), font(fs, "regular"), avail), font(fs, "regular"), fg, anchor="lm")
 
     _rows(ctx, inner, rows, row_h, draw, fg)
 
 
 def w_todo(ctx: Ctx, box, props, data, today):
-    inner, fg, acc = _frame(ctx, box, props)
-    inner = _title(ctx, inner, props, fg, acc, "format-list-checks")
+    inner, fg = _card(ctx, box, props, "card")
+    inner = _title(ctx, inner, props, fg, "format-list-checks")
     x, y, w, h = inner
     rows = (data or {}).get("rows") or []
     if not rows:
         _empty(ctx, inner, props.get("empty") or "Alles erledigt", fg)
         return
     row_h = int(props.get("row_height", 36))
-    fs = max(13, int(row_h * 0.47))
+    fs = max(14, int(row_h * 0.48))
 
     def draw(r, ry, rh):
         cy = ry + rh / 2
         rr = rh * 0.25
-        ctx.d.ellipse([x, cy - rr, x + 2 * rr, cy + rr], outline=ctx.c(acc), width=3)
+        ctx.outline((x, cy - rr, 2 * rr, 2 * rr), radius=int(rr), color="fg", width=2)
         tx = x + 2 * rr + 12
-        ctx.text((tx, cy), ctx.fit(r.get("text", ""), font(fs, "medium"), x + w - tx), font(fs, "medium"), fg, anchor="lm")
+        ctx.text((tx, cy + 1), ctx.fit(r.get("text", ""), font(fs, "regular"), x + w - tx), font(fs, "regular"), fg,
+                 anchor="lm")
 
     _rows(ctx, inner, rows, row_h, draw, fg)
 
 
 def w_text(ctx: Ctx, box, props, data, today):
-    (x, y, w, h), fg, acc = _frame(ctx, box, props)
+    (x, y, w, h), fg = _card(ctx, box, props, "none")
     txt = str(props.get("text", ""))
     size = int(props.get("size", 28))
-    f = font(size, props.get("weight", "semibold"))
+    f = font(size, props.get("weight", "medium"))
     color = props.get("color") or "fg"
     if fg != "fg":
         color = fg
-    align = props.get("align", "left") if props.get("align") in ("left", "center", "right") else "left"
+    align = props.get("align") if props.get("align") in ("left", "center", "right") else "left"
     lines, cur = [], ""
     for word in txt.split():
         test = (cur + " " + word).strip()
@@ -464,7 +689,7 @@ def w_text(ctx: Ctx, box, props, data, today):
             cur = word
     if cur:
         lines.append(cur)
-    lh = size * 1.22
+    lh = size * 1.2
     lines = lines[: max(1, int(h // lh))]
     ty = y + (h - lh * len(lines)) / 2
     ax = {"left": x, "center": x + w / 2, "right": x + w}[align]
@@ -477,49 +702,96 @@ def w_text(ctx: Ctx, box, props, data, today):
 def w_divider(ctx: Ctx, box, props, data, today):
     x, y, w, h = box
     col = props.get("color") or "fg"
-    t = int(props.get("thickness", 2))
+    t = int(props.get("thickness", 1))
     if w >= h:
-        ctx.d.line([x, y + h / 2, x + w, y + h / 2], fill=ctx.c(col), width=t)
+        ctx.line([x, y + h / 2, x + w, y + h / 2], col, t)
     else:
-        ctx.d.line([x + w / 2, y, x + w / 2, y + h], fill=ctx.c(col), width=t)
+        ctx.line([x + w / 2, y, x + w / 2, y + h], col, t)
 
 
 WIDGETS = {
-    "date": w_date,
-    "weather_now": w_weather_now,
-    "weather_forecast": w_weather_forecast,
-    "waste": w_waste,
-    "calendar": w_calendar,
-    "entity": w_entity,
-    "entities": w_entities,
-    "todo": w_todo,
-    "text": w_text,
-    "divider": w_divider,
+    "date": w_date, "weather_now": w_weather_now, "weather_details": w_weather_details,
+    "weather_forecast": w_weather_forecast, "weather_chart": w_weather_chart,
+    "waste": w_waste, "calendar": w_calendar, "entity": w_entity, "entities": w_entities,
+    "todo": w_todo, "text": w_text, "divider": w_divider,
 }
+
+
+# ------------------------------------------------------------------ Dithering und Ausgabe
+def _palette_image(colors: dict[str, tuple[int, int, int]]) -> Image.Image:
+    pal = Image.new("P", (1, 1))
+    flat: list[int] = []
+    for n in ORDER:
+        flat += colors[n]
+    pal.putpalette(flat + [0, 0, 0] * (256 - len(ORDER)))
+    return pal
+
+
+def _dither(paint: Image.Image) -> Image.Image:
+    """Floyd-Steinberg auf die gemessenen Panelfarben, Ausgabe in reinen Farben.
+
+    Neutrale Flächen (Grau, Weiß) werden nur aus Schwarz und Weiß gemischt,
+    damit sie ruhig wirken und keine bunten Punkte bekommen.
+    """
+    lo, hi = SEEN["black"], SEEN["white"]
+    lut: list[int] = []
+    for c in range(3):
+        lut += [int(lo[c] + v * (hi[c] - lo[c]) / 255) for v in range(256)]
+    q = paint.point(lut).quantize(palette=_palette_image(SEEN), dither=Image.Dither.FLOYDSTEINBERG)
+    q.putpalette(_palette_image(PURE).getpalette())
+    color = q.convert("RGB")
+    bw = paint.convert("L").convert("1", dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
+    r, g, b = paint.split()
+    chroma = ImageChops.subtract(ImageChops.lighter(ImageChops.lighter(r, g), b),
+                                 ImageChops.darker(ImageChops.darker(r, g), b))
+    neutral = chroma.point(lambda v: 255 if v < 26 else 0)
+    return Image.composite(bw, color, neutral)
 
 
 def render_image(layout: dict[str, Any], data: dict[str, Any], today: date,
                  error: str | None = None) -> Image.Image:
+    """Bild in den reinen Panelfarben (so wird es an den Rahmen geschickt)."""
     theme = layout.get("theme") or {}
-    img = Image.new("RGB", (W, H), PALETTE["black" if theme.get("mode") == "dark" else "white"])
-    ctx = Ctx(img, theme)
+    t = THEMES.get(theme.get("mode"), THEMES["light"])
+    paint = Image.new("RGB", (W, H), t["bg"])
+    ctx = Ctx(paint, theme)
+    items = []
     for wd in layout.get("widgets") or []:
         fn = WIDGETS.get(wd.get("type"))
-        if fn is None:
-            continue
-        box = (int(wd.get("x", 0)), int(wd.get("y", 0)),
-               max(10, int(wd.get("w", 100))), max(10, int(wd.get("h", 50))))
-        try:
-            fn(ctx, box, wd.get("props") or {}, (data or {}).get(wd.get("id")), today)
-        except Exception as err:  # noqa: BLE001 – ein defektes Widget soll nicht alles stoppen
-            ctx.d.rectangle([box[0], box[1], box[0] + box[2], box[1] + box[3]], outline=PALETTE["red"], width=2)
-            ctx.text((box[0] + 6, box[1] + 6), ctx.fit(f"Fehler: {err}", font(14, "medium"), box[2] - 12),
-                     font(14, "medium"), "red")
+        if fn:
+            box = (int(wd.get("x", 0)), int(wd.get("y", 0)), max(10, int(wd.get("w", 100))), max(10, int(wd.get("h", 50))))
+            items.append((fn, wd, box))
+    failed: dict[int, str] = {}
+    for stage in ("paint", "ink"):
+        if stage == "ink":
+            ctx.start_ink(_dither(paint))
+        for i, (fn, wd, box) in enumerate(items):
+            if i in failed:
+                continue
+            try:
+                fn(ctx, box, wd.get("props") or {}, (data or {}).get(wd.get("id")), today)
+            except Exception as err:  # noqa: BLE001 – ein defektes Widget soll nicht alles stoppen
+                failed[i] = str(err)
+    img = ctx.ink_img
+    d = ImageDraw.Draw(img)
+    d.fontmode = "1"
+    for i, msg in failed.items():
+        x, y, w, h = items[i][2]
+        d.rectangle([x, y, x + w, y + h], outline=PURE["red"], width=2)
+        d.text((x + 6, y + 6), ctx.fit(f"Fehler: {msg}", font(14, "medium"), w - 12), font=font(14, "medium"),
+               fill=PURE["red"])
     if error:
-        f = font(14, "semibold")
-        ctx.d.rectangle([0, H - 22, W, H], fill=PALETTE["red"])
-        ctx.text((10, H - 11), ctx.fit(error, f, W - 20), f, "white", anchor="lm")
+        f = font(14, "medium")
+        d.rectangle([0, H - 22, W, H], fill=PURE["red"])
+        d.text((10, H - 11), ctx.fit(error, f, W - 20), font=f, fill=PURE["white"], anchor="lm")
     return img
+
+
+def simulate(img: Image.Image) -> Image.Image:
+    """Zeigt das Bild mit den Farben, die das Panel tatsächlich darstellt."""
+    q = img.quantize(palette=_palette_image(PURE), dither=Image.Dither.NONE)
+    q.putpalette(_palette_image(SEEN).getpalette())
+    return q.convert("RGB")
 
 
 def to_png(img: Image.Image, rotation: int = 0) -> bytes:

@@ -3,8 +3,8 @@
 Zeigt ein frei gestaltbares Layout aus Home Assistant auf einem **Waveshare 7.3" E6 PhotoPainter** (Spectra 6, 800 × 480) mit Raspberry Pi Zero an.
 
 - **Grafischer Layout-Editor** in der Seitenleiste („Bilderrahmen“): Elemente per Drag & Drop platzieren, Größe ziehen, Hilfslinien, Rückgängig, Live-Vorschau in den echten sechs Farben
-- **Elemente:** Datum, Wetter jetzt, Wettervorhersage, Müllabfuhr, Kalender, Einzelwert, Werteliste, To-do-Liste, Text, Linie
-- **Modernes Design:** Inter-Schrift, Material-Design-Icons, Karten (umrandet, gefüllt, Akzent), hell oder dunkel, frei wählbare Akzentfarbe
+- **Elemente:** Datum/Titel, Wetter jetzt, Wetterdetails, Wettervorhersage, Temperaturverlauf, Müllabfuhr, Kalender, Einzelwert, Werteliste, To-do-Liste, Text, Linie
+- **Modernes Design:** Grau, Orange, Pastell und Verläufe werden aus den sechs Displayfarben gedithert (mit gemessener Spectra-6-Palette), Text und Icons bleiben gestochen scharf. Jost-Schrift, illustrierte Wettersymbole, Papier/Weiß/Dunkel, Akzentfarbe
 - Knopf **„Jetzt aktualisieren“**, Vorschaubild und Status direkt in Home Assistant
 - Der Rahmen wird nur neu gezeichnet, wenn sich etwas geändert hat
 
@@ -47,4 +47,4 @@ Protokoll auf dem Pi: `journalctl -u bilderrahmen -f`
 
 ## Lizenz
 
-MIT. Enthält die Schrift Inter (SIL Open Font License) und Material Design Icons (Pictogrammers Free License / Apache 2.0), siehe `fonts/`.
+MIT. Enthält die Schrift Jost (SIL Open Font License) und Material Design Icons (Pictogrammers Free License / Apache 2.0), siehe `fonts/`.

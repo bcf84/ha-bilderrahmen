@@ -29,14 +29,14 @@ header .status { font-size:13px; opacity:.85; white-space:nowrap; }
 .btn.soft { background:var(--secondary-background-color, #f2f2f2); color:var(--primary-text-color); }
 select.frame { background:rgba(255,255,255,.16); color:inherit; border:0; border-radius:18px; height:34px; padding:0 10px; }
 select.frame option { color:#000; }
-.body { display:grid; grid-template-columns:248px 1fr 320px; min-height:0; }
+.body { display:grid; grid-template-columns:270px 1fr 320px; min-height:0; }
 aside { background:var(--panel-bg); overflow:auto; min-height:0; }
 aside.left { border-right:1px solid var(--line); }
 aside.right { border-left:1px solid var(--line); }
 .sec { padding:16px; border-bottom:1px solid var(--line); }
 .sec h2 { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin:0 0 12px; font-weight:600; }
 .palette { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.tile { border:1px solid var(--line); border-radius:12px; padding:10px 8px; display:flex; flex-direction:column; align-items:center;
+.tile { border:1px solid var(--line); border-radius:12px; padding:10px 6px; overflow-wrap:anywhere; hyphens:auto; display:flex; flex-direction:column; align-items:center;
   gap:6px; cursor:grab; user-select:none; font-size:12.5px; text-align:center; background:var(--panel-bg); transition:.15s; }
 .tile:hover { border-color:var(--accent); color:var(--accent); transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.06); }
 .tile ha-icon { --mdc-icon-size:24px; }
@@ -60,7 +60,7 @@ main { overflow:auto; display:flex; flex-direction:column; align-items:center; j
 .mat { background:#fff; padding:6px; border-radius:4px; }
 .stage-outer { position:relative; overflow:hidden; }
 .stage { position:absolute; left:0; top:0; width:${W}px; height:${H}px; transform-origin:0 0; background:#fff; }
-.stage img { position:absolute; inset:0; width:100%; height:100%; image-rendering:pixelated; pointer-events:none; user-select:none; }
+.stage img { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; user-select:none; }
 .stage .busy { position:absolute; right:8px; top:8px; width:18px; height:18px; border-radius:50%; border:3px solid rgba(0,0,0,.15);
   border-top-color:var(--accent); animation:spin .8s linear infinite; display:none; }
 .stage.loading .busy { display:block; }
@@ -90,6 +90,10 @@ input[type=text], input[type=number], select.in { width:100%; height:38px; borde
 input:focus, select.in:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(var(--rgb-primary-color, 3,169,244), .15); }
 .grid4 { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
 .grid4 .field { margin:0; } .grid4 input { padding:0 6px; text-align:center; }
+.checks { display:flex; flex-wrap:wrap; gap:6px; }
+.checks button { border:1px solid var(--line); background:var(--panel-bg); color:var(--primary-text-color); border-radius:16px;
+  padding:5px 11px; font-size:12.5px; cursor:pointer; }
+.checks button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
 .seg { display:flex; background:var(--secondary-background-color, #f2f2f2); border-radius:10px; padding:3px; gap:3px; }
 .seg button { flex:1; border:0; background:none; border-radius:8px; height:32px; cursor:pointer; color:var(--primary-text-color); font-size:13px; }
 .seg button.on { background:var(--panel-bg); box-shadow:0 1px 3px rgba(0,0,0,.15); font-weight:600; }
@@ -377,13 +381,13 @@ class BilderrahmenPanel extends HTMLElement {
     const t = this._layout?.theme || {};
     return `<div class="sec"><h2>Design</h2>
       <div class="field"><label>Hintergrund</label><div class="seg" id="mode">
-        <button data-v="light" class="${t.mode !== "dark" ? "on" : ""}">Hell</button><button data-v="dark" class="${t.mode === "dark" ? "on" : ""}">Dunkel</button></div></div>
+        ${[["light", "Papier"], ["white", "Weiß"], ["dark", "Dunkel"]].map(([v, l]) => `<button data-v="${v}" class="${(t.mode || "light") === v ? "on" : ""}">${l}</button>`).join("")}</div></div>
       <div class="field"><label>Akzentfarbe</label><div class="swatches" id="acc">
         ${Object.entries(ACCENTS).map(([k, c]) => `<div class="swatch ${t.accent === k ? "on" : ""}" data-v="${k}" title="${k}" style="background:${c}"></div>`).join("")}</div></div>
       </div>
       <div class="sec empty"><ha-icon icon="mdi:gesture-tap"></ha-icon>
         Wähle ein Element auf der Fläche, um es zu bearbeiten.<br><br>
-        Neue Elemente ziehst du aus der linken Leiste auf die Fläche. Die Vorschau zeigt genau, was der Rahmen anzeigt – in seinen sechs Farben.</div>`;
+        Neue Elemente ziehst du aus der linken Leiste auf die Fläche. Die Vorschau zeigt, wie der Rahmen aussieht: Grau, Orange und Pastell entstehen dort aus feinen Punkten der sechs Displayfarben.</div>`;
   }
   _bindTheme(P) {
     P.querySelectorAll("#mode button").forEach((b) => b.onclick = () => { this._snapshot(); this._layout.theme.mode = b.dataset.v; this._afterChange(); });
@@ -395,6 +399,11 @@ class BilderrahmenPanel extends HTMLElement {
     if (f.type === "bool") return `<div class="field"><label class="toggle">${esc(f.label)}<input type="checkbox" id="${id}" ${v ? "checked" : ""}></label></div>`;
     if (f.type === "select") return `<div class="field"><label>${esc(f.label)}</label><select class="in" id="${id}">
       ${f.options.map((o) => `<option value="${o.value}" ${o.value === v ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></div>`;
+    if (f.type === "checks") {
+      const cur = Array.isArray(v) ? v : [];
+      return `<div class="field"><label>${esc(f.label)}</label><div class="checks" id="${id}">
+        ${f.options.map((o) => `<button type="button" data-v="${o.value}" class="${cur.includes(o.value) ? "on" : ""}">${esc(o.label)}</button>`).join("")}</div></div>`;
+    }
     if (f.type === "number") return `<div class="field"><label>${esc(f.label)}${f.unit ? ` (${f.unit})` : ""}</label>
       <input type="number" id="${id}" min="${f.min ?? ""}" max="${f.max ?? ""}" value="${v ?? f.default ?? ""}"></div>`;
     if (f.type === "entity") {
@@ -414,6 +423,10 @@ class BilderrahmenPanel extends HTMLElement {
       else if (f.type === "select") el.onchange = () => { this._snapshot(); props[f.key] = el.value; changed(); };
       else if (f.type === "number") { el.onfocus = () => this._snapshot(); el.oninput = () => { const n = parseFloat(el.value); if (!isNaN(n)) { props[f.key] = n; changed(); } }; }
       else if (f.type === "entity") this._bindPicker(el, f, props, changed);
+      else if (f.type === "checks") el.querySelectorAll("button").forEach((b) => b.onclick = () => {
+        this._snapshot(); const cur = new Set(props[f.key] || []);
+        cur.has(b.dataset.v) ? cur.delete(b.dataset.v) : cur.add(b.dataset.v);
+        props[f.key] = f.options.map((o) => o.value).filter((x) => cur.has(x)); b.classList.toggle("on"); changed(); });
       else { el.onfocus = () => this._snapshot(); el.oninput = () => { props[f.key] = el.value; changed(); }; }
     }
   }
