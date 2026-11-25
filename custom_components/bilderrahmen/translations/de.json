@@ -1,0 +1,115 @@
+{
+  "title": "E-Paper Bilderrahmen",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bilderrahmen verbinden",
+        "description": "Adresse des Raspberry Pi im Rahmen. Der Empfänger-Dienst muss dort laufen.",
+        "data": {
+          "host": "Adresse (Hostname oder IP)",
+          "port": "Port"
+        }
+      },
+      "content": {
+        "title": "Inhalte",
+        "description": "Wähle aus, was auf dem Rahmen erscheinen soll. Leere Felder werden ausgeblendet.",
+        "data": {
+          "weather_entity": "Wetter",
+          "waste_entities": "Müllabfuhr-Sensoren",
+          "calendar_entities": "Kalender",
+          "calendar_title": "Überschrift Kalender",
+          "calendar_days": "Kalender: Tage im Voraus",
+          "value_entities": "Weitere Werte",
+          "values_title": "Überschrift Werte",
+          "rotation": "Einbaulage",
+          "interval": "Aktualisieren alle"
+        },
+        "data_description": {
+          "weather_entity": "Aktuelles Wetter und 3-Tage-Vorschau links.",
+          "waste_entities": "z. B. Waste Collection Schedule. Farbe wird aus dem Namen erkannt (Rest, Bio, Gelb, Papier).",
+          "calendar_entities": "Termine oder Geburtstage. Doppelte Einträge werden zusammengefasst.",
+          "value_entities": "Beliebige Entitäten, z. B. Temperaturen, Türschloss, Akkustand.",
+          "interval": "Der Rahmen wird nur neu gezeichnet, wenn sich etwas geändert hat."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Rahmen nicht erreichbar. Läuft der Empfänger auf dem Pi? Adresse prüfen."
+    },
+    "abort": {
+      "already_configured": "Dieser Rahmen ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bilderrahmen",
+        "menu_options": {
+          "content": "Inhalte und Anzeige",
+          "connection": "Verbindung zum Rahmen"
+        }
+      },
+      "content": {
+        "title": "Inhalte",
+        "description": "Wähle aus, was auf dem Rahmen erscheinen soll. Leere Felder werden ausgeblendet.",
+        "data": {
+          "weather_entity": "Wetter",
+          "waste_entities": "Müllabfuhr-Sensoren",
+          "calendar_entities": "Kalender",
+          "calendar_title": "Überschrift Kalender",
+          "calendar_days": "Kalender: Tage im Voraus",
+          "value_entities": "Weitere Werte",
+          "values_title": "Überschrift Werte",
+          "rotation": "Einbaulage",
+          "interval": "Aktualisieren alle"
+        },
+        "data_description": {
+          "weather_entity": "Aktuelles Wetter und 3-Tage-Vorschau links.",
+          "waste_entities": "z. B. Waste Collection Schedule. Farbe wird aus dem Namen erkannt (Rest, Bio, Gelb, Papier).",
+          "calendar_entities": "Termine oder Geburtstage. Doppelte Einträge werden zusammengefasst.",
+          "value_entities": "Beliebige Entitäten, z. B. Temperaturen, Türschloss, Akkustand.",
+          "interval": "Der Rahmen wird nur neu gezeichnet, wenn sich etwas geändert hat."
+        }
+      },
+      "connection": {
+        "title": "Verbindung",
+        "description": "Adresse des Raspberry Pi im Rahmen. Der Empfänger-Dienst muss dort laufen.",
+        "data": {
+          "host": "Adresse (Hostname oder IP)",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Rahmen nicht erreichbar. Läuft der Empfänger auf dem Pi? Adresse prüfen."
+    }
+  },
+  "selector": {
+    "rotation": {
+      "options": {
+        "0": "Normal",
+        "180": "Um 180° gedreht"
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh": {
+        "name": "Jetzt aktualisieren"
+      }
+    },
+    "image": {
+      "preview": {
+        "name": "Vorschau"
+      }
+    },
+    "sensor": {
+      "last_display": {
+        "name": "Zuletzt angezeigt"
+      },
+      "status": {
+        "name": "Status"
+      }
+    }
+  }
+}

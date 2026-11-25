@@ -1,0 +1,115 @@
+{
+  "title": "E-Paper Bilderrahmen",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect frame",
+        "description": "Address of the Raspberry Pi in the frame. The receiver service must be running.",
+        "data": {
+          "host": "Host or IP",
+          "port": "Port"
+        }
+      },
+      "content": {
+        "title": "Content",
+        "description": "Choose what the frame shows. Empty fields are hidden.",
+        "data": {
+          "weather_entity": "Weather",
+          "waste_entities": "Waste collection sensors",
+          "calendar_entities": "Calendars",
+          "calendar_title": "Calendar heading",
+          "calendar_days": "Calendar: days ahead",
+          "value_entities": "Additional values",
+          "values_title": "Values heading",
+          "rotation": "Mounting orientation",
+          "interval": "Refresh every"
+        },
+        "data_description": {
+          "weather_entity": "Current weather and 3-day forecast on the left.",
+          "waste_entities": "e.g. Waste Collection Schedule. Colour is derived from the name.",
+          "calendar_entities": "Events or birthdays; duplicates are merged.",
+          "value_entities": "Any entities, e.g. temperatures, locks, battery.",
+          "interval": "The frame only redraws when something changed."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the frame. Is the receiver running on the Pi?"
+    },
+    "abort": {
+      "already_configured": "This frame is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Picture frame",
+        "menu_options": {
+          "content": "Content and display",
+          "connection": "Connection"
+        }
+      },
+      "content": {
+        "title": "Content",
+        "description": "Choose what the frame shows. Empty fields are hidden.",
+        "data": {
+          "weather_entity": "Weather",
+          "waste_entities": "Waste collection sensors",
+          "calendar_entities": "Calendars",
+          "calendar_title": "Calendar heading",
+          "calendar_days": "Calendar: days ahead",
+          "value_entities": "Additional values",
+          "values_title": "Values heading",
+          "rotation": "Mounting orientation",
+          "interval": "Refresh every"
+        },
+        "data_description": {
+          "weather_entity": "Current weather and 3-day forecast on the left.",
+          "waste_entities": "e.g. Waste Collection Schedule. Colour is derived from the name.",
+          "calendar_entities": "Events or birthdays; duplicates are merged.",
+          "value_entities": "Any entities, e.g. temperatures, locks, battery.",
+          "interval": "The frame only redraws when something changed."
+        }
+      },
+      "connection": {
+        "title": "Connection",
+        "description": "Address of the Raspberry Pi in the frame. The receiver service must be running.",
+        "data": {
+          "host": "Host or IP",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the frame. Is the receiver running on the Pi?"
+    }
+  },
+  "selector": {
+    "rotation": {
+      "options": {
+        "0": "Normal",
+        "180": "Rotated 180°"
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh": {
+        "name": "Refresh now"
+      }
+    },
+    "image": {
+      "preview": {
+        "name": "Preview"
+      }
+    },
+    "sensor": {
+      "last_display": {
+        "name": "Last displayed"
+      },
+      "status": {
+        "name": "Status"
+      }
+    }
+  }
+}

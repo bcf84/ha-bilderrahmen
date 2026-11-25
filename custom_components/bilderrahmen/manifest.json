@@ -1,0 +1,14 @@
+{
+  "domain": "bilderrahmen",
+  "name": "E-Paper Bilderrahmen",
+  "codeowners": [
+    "@bcf84"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/bcf84/ha-bilderrahmen",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/bcf84/ha-bilderrahmen/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
