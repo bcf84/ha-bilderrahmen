@@ -26,7 +26,17 @@ chmod +x "$DIR"/*.py
 
 echo "     Akku-Messung (I2C) und WLAN-Werkzeuge vorbereiten ..."
 sudo raspi-config nonint do_i2c 0 >/dev/null 2>&1 || true
-sudo apt-get install -y -qq python3-smbus i2c-tools wireless-tools fonts-dejavu-core >/dev/null 2>&1 || true
+sudo apt-get install -y -qq python3-smbus i2c-tools wireless-tools iw fonts-dejavu-core >/dev/null 2>&1 || true
+
+echo "     WLAN-Stromsparmodus abschalten (verhindert Verbindungsabbrüche) ..."
+sudo mkdir -p /etc/NetworkManager/conf.d
+printf '[connection]\nwifi.powersave = 2\n' | sudo tee /etc/NetworkManager/conf.d/bilderrahmen-wifi-powersave.conf > /dev/null
+if command -v nmcli > /dev/null; then
+  nmcli -t -f NAME,TYPE connection show 2>/dev/null | awk -F: '$2 ~ /wireless/ {print $1}' | while read -r c; do
+    sudo nmcli connection modify "$c" 802-11-wireless.powersave 2 >/dev/null 2>&1 || true
+  done
+fi
+sudo iw dev wlan0 set power_save off >/dev/null 2>&1 || true
 
 echo "2/4  Alte stündliche Aufgabe entfernen (falls vorhanden) ..."
 if crontab -l 2>/dev/null | grep -q frame_dashboard.py; then

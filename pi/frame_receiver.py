@@ -29,7 +29,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 PORT = int(os.environ.get("FRAME_PORT", "8765"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "last_hash")
@@ -194,11 +194,54 @@ def worker():
                 state["busy"] = False
 
 
+def gateway_ok():
+    """Prüft, ob der Router antwortet."""
+    try:
+        route = subprocess.run(["ip", "route", "show", "default"], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r"default via (\S+)", route)
+        if not m:
+            return False
+        return subprocess.run(["ping", "-c", "1", "-W", "3", m.group(1)], capture_output=True, timeout=8).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def repair_wifi(level):
+    """Stufenweise WLAN-Reparatur: Funk neu starten, Netzwerkdienst neu starten, Neustart."""
+    if level == 1:
+        log("WLAN weg – schalte WLAN aus und wieder ein")
+        subprocess.run(["sudo", "-n", "nmcli", "radio", "wifi", "off"], capture_output=True, timeout=20)
+        time.sleep(3)
+        subprocess.run(["sudo", "-n", "nmcli", "radio", "wifi", "on"], capture_output=True, timeout=20)
+    elif level == 2:
+        log("WLAN weiter weg – starte Netzwerkdienst neu")
+        subprocess.run(["sudo", "-n", "systemctl", "restart", "NetworkManager"], capture_output=True, timeout=60)
+    elif level == 3:
+        log("WLAN seit 30 Minuten weg – starte den Pi neu")
+        subprocess.run(["sudo", "-n", "reboot"], capture_output=True, timeout=30)
+
+
 def guard():
-    """Akku-Schutz und Verbindungs-Wächter, läuft jede Minute."""
+    """Akku-Schutz, WLAN-Wächter und Verbindungs-Wächter, läuft jede Minute."""
     low_count = 0
+    net_down = 0
     while True:
         time.sleep(60)
+        try:
+            if gateway_ok():
+                if net_down:
+                    log(f"WLAN wieder da (nach {net_down} min)")
+                net_down = 0
+            else:
+                net_down += 1
+                if net_down == 3:
+                    repair_wifi(1)
+                elif net_down == 10:
+                    repair_wifi(2)
+                elif net_down == 30:
+                    repair_wifi(3)
+        except Exception as e:  # noqa: BLE001
+            log(f"WLAN-Wächter: {e}")
         try:
             b = battery.read()
             if b.get("present") and not b.get("charging") and b.get("voltage", 9) <= LOW_VOLT:
