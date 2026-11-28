@@ -574,7 +574,10 @@ class FrameManager:
             return "–", ""
         unit = st.attributes.get(ATTR_UNIT_OF_MEASUREMENT) or ""
         try:
-            return _fmt_number(float(s)), unit
+            v = float(s)
+            if unit in ("%", "ppm", "hPa", "lx", "W") or st.attributes.get("device_class") == "humidity":
+                v = float(round(v))  # ganze Zahlen: weniger Bildwechsel, ruhigere Anzeige
+            return _fmt_number(v), unit
         except ValueError:
             pass
         if st.domain == "climate" and st.attributes.get("current_temperature") is not None:

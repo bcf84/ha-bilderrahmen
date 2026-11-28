@@ -38,6 +38,37 @@ if command -v nmcli > /dev/null; then
 fi
 sudo iw dev wlan0 set power_save off >/dev/null 2>&1 || true
 
+echo "     Freigabe für automatische Reparaturen (WLAN, Neustart, Herunterfahren bei leerem Akku) ..."
+SUDOERS=/etc/sudoers.d/bilderrahmen
+TMP=$(mktemp)
+echo "$USER ALL=(root) NOPASSWD: $(command -v shutdown), $(command -v reboot), $(command -v nmcli || echo /usr/bin/nmcli), $(command -v systemctl) restart NetworkManager" > "$TMP"
+if sudo visudo -cf "$TMP" > /dev/null; then
+  sudo install -m 0440 -o root -g root "$TMP" "$SUDOERS"
+else
+  echo "     (Freigabe übersprungen – Prüfung fehlgeschlagen)"
+fi
+rm -f "$TMP"
+
+echo "     Strom sparen: Bluetooth und LED aus, sparsamer CPU-Takt ..."
+CFG=/boot/firmware/config.txt
+[ -f "$CFG" ] || CFG=/boot/config.txt
+NEED_REBOOT=0
+for line in "dtoverlay=disable-bt" "dtparam=act_led_trigger=none" "dtparam=act_led_activelow=on"; do
+  if ! grep -qx "$line" "$CFG"; then echo "$line" | sudo tee -a "$CFG" > /dev/null; NEED_REBOOT=1; fi
+done
+sudo systemctl disable --now hciuart.service bluetooth.service >/dev/null 2>&1 || true
+sudo tee /etc/systemd/system/bilderrahmen-power.service > /dev/null << 'EOF2'
+[Unit]
+Description=Bilderrahmen: sparsamer CPU-Takt
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo powersave > "$g"; done'
+[Install]
+WantedBy=multi-user.target
+EOF2
+sudo systemctl daemon-reload
+sudo systemctl enable --now bilderrahmen-power.service >/dev/null 2>&1 || true
+
 echo "2/4  Alte stündliche Aufgabe entfernen (falls vorhanden) ..."
 if crontab -l 2>/dev/null | grep -q frame_dashboard.py; then
   crontab -l 2>/dev/null | grep -v frame_dashboard.py | crontab -
@@ -74,6 +105,12 @@ if curl -fsS "http://127.0.0.1:$PORT/status" > /dev/null; then
   echo "=== Fertig. Der Rahmen wartet jetzt auf Bilder von Home Assistant. ==="
   echo "Adresse für Home Assistant:  $(hostname).local   (oder $IP)"
   echo "Port:                        $PORT"
+  if [ "$NEED_REBOOT" = "1" ]; then
+    echo
+    echo "Der Pi startet in 10 Sekunden neu, damit Bluetooth und LED aus sind."
+    sleep 10
+    sudo reboot
+  fi
 else
   echo "Der Dienst antwortet nicht. Protokoll: journalctl -u bilderrahmen -n 30"
   exit 1
